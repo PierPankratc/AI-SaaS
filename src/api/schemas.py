@@ -304,3 +304,10 @@ class Schedule(BaseModel):
         if self.info and self.info.week_start:
             return self.info.week_start.date()
         return None
+
+
+class Faculty(BaseModel):
+    """Институт (факультет) КГУ."""
+
+    id: int
+    name: str
