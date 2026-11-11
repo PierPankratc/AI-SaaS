@@ -2,6 +2,7 @@
 
 from datetime import date
 
+from src.api.eios_client import EiosApiError
 from src.api.schemas import EducationLevel, Faculty, Group, Teacher
 from src.bot.core import BotCore
 from src.bot.drafts import InMemoryDrafts
@@ -195,3 +196,33 @@ async def test_garbage_payload_is_safe() -> None:
     core, _ = make_core()
     reply = await core.handle(9, None, {"foo": "bar"})
     assert reply.keyboard is not None
+
+
+class FailingCatalog(FakeCatalog):
+    async def get_faculties(self):
+        raise EiosApiError("unavailable")
+
+
+async def test_first_contact_greets() -> None:
+    core, _ = make_core()
+    reply = await core.handle(1, None, None)
+    assert "Здравствуйте" in reply.text
+
+
+async def test_returning_user_gets_short_prompt() -> None:
+    core, _ = make_core()
+    await core.handle(1, None, None)
+    await core.handle(1, None, make_payload(Action.ROLE, value="student"))
+
+    reply = await core.handle(1, "просто текст", None)
+    assert "Здравствуйте" not in reply.text
+
+
+async def test_catalog_unavailable_shows_friendly_error() -> None:
+    core = BotCore(
+        FailingCatalog(), FakeSchedules(), FakeRepository(), InMemoryDrafts()
+    )
+    await core.handle(1, None, None)
+
+    reply = await core.handle(1, None, make_payload(Action.ROLE, value="student"))
+    assert "недоступен" in reply.text.lower()

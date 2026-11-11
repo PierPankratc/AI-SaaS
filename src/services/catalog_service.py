@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
-from src.api.eios_client import EiosClient
+from src.api.eios_client import EiosApiError, EiosClient
 from src.api.schemas import (
     LEVEL_ORDER,
     EducationLevel,
@@ -139,7 +139,14 @@ class CatalogService:
         cached = await self._cache.get_catalog("years")
         if cached is not None:
             return [str(year) for year in cached]
-        years = await self._client.get_years()
+        try:
+            years = await self._client.get_years()
+        except EiosApiError:
+            backup = await self._cache.get_catalog_backup("years")
+            if backup is None:
+                raise
+            logger.warning("ЭИОС недоступен, учебные годы из резервного кэша")
+            return [str(year) for year in backup]
         await self._cache.set_catalog("years", years)
         return years
 
@@ -155,7 +162,15 @@ class CatalogService:
         if cached is not None:
             return [Group.model_validate(item) for item in cached]
 
-        groups = await self._client.get_groups(year)
+        try:
+            groups = await self._client.get_groups(year)
+        except EiosApiError:
+            backup = await self._cache.get_catalog_backup(key)
+            if backup is None:
+                raise
+            logger.warning("ЭИОС недоступен, группы из резервного кэша: %s", key)
+            return [Group.model_validate(item) for item in backup]
+
         await self._cache.set_catalog(
             key, [group.model_dump(mode="json") for group in groups]
         )
@@ -166,7 +181,15 @@ class CatalogService:
         if cached is not None:
             return [Teacher.model_validate(item) for item in cached]
 
-        teachers = await self._client.get_teachers()
+        try:
+            teachers = await self._client.get_teachers()
+        except EiosApiError:
+            backup = await self._cache.get_catalog_backup("teachers")
+            if backup is None:
+                raise
+            logger.warning("ЭИОС недоступен, преподаватели из резервного кэша")
+            return [Teacher.model_validate(item) for item in backup]
+
         await self._cache.set_catalog(
             "teachers", [teacher.model_dump(mode="json") for teacher in teachers]
         )

@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from src.api.eios_client import EiosApiError
 from src.api.schemas import EducationLevel
 from src.bot import ui
 from src.bot.drafts import DraftStore, OnboardingDraft
@@ -28,6 +29,12 @@ INVALID_TEACHER_QUERY = (
     "Допустимы буквы, пробел и дефис."
 )
 MAIN_MENU_HINT = "Выберите действие 👇"
+UNAVAILABLE = "🚧 Сервис расписания временно недоступен. Попробуйте через пару минут."
+WELCOME = (
+    "Здравствуйте! Я бот расписания КГУ 👋\n"
+    "Помогу узнать пары на сегодня, завтра и неделю.\n\n"
+    "Выберите, кто вы 👇"
+)
 TEACHER_PROMPT = (
     "Введите фамилию преподавателя сообщением.\n"
     "Например: «Адеева» или «Адеева Татьяна Николаевна»."
@@ -80,6 +87,11 @@ class BotCore:
         """Обрабатывает входящее событие и возвращает ответ."""
         try:
             return await self._handle(vk_id, text, payload)
+        except EiosApiError:
+            logger.warning(
+                "ЭИОС недоступен при обработке vk_id=%s", vk_id, exc_info=True
+            )
+            return Reply(UNAVAILABLE)
         except Exception:  # noqa: BLE001 - детали ошибки не показываем
             logger.exception("Ошибка обработки сообщения vk_id=%s", vk_id)
             return Reply("⚠️ Произошла ошибка. Попробуйте позже.")
@@ -98,7 +110,7 @@ class BotCore:
             draft = await self._drafts.get(vk_id)
             if draft is not None and draft.role == Role.TEACHER.value:
                 return await self._handle_teacher_query(vk_id, text or "")
-            return await self._start_onboarding(vk_id)
+            return await self._start_onboarding(vk_id, greeting=draft is None)
 
         action = decoded.action
         if profile is not None and action in _ONBOARDING_ACTIONS:
@@ -132,10 +144,11 @@ class BotCore:
 
     # --- сценарий регистрации ---
 
-    async def _start_onboarding(self, vk_id: int) -> Reply:
+    async def _start_onboarding(self, vk_id: int, *, greeting: bool = False) -> Reply:
         await self._drafts.clear(vk_id)
         await self._drafts.save(vk_id, OnboardingDraft())
-        return Reply("Кто вы? Выберите роль 👇", ui.role_keyboard())
+        text = WELCOME if greeting else "Кто вы? Выберите роль 👇"
+        return Reply(text, ui.role_keyboard())
 
     async def _on_role(self, vk_id: int, payload: Payload) -> Reply:
         role = payload.value

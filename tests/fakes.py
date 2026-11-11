@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from src.api.eios_client import EiosApiError
 from src.api.schemas import Group, Teacher
 
 
@@ -53,20 +54,29 @@ class FakeEiosClient:
         years: list[str],
         groups: list[Group],
         teachers: list[Teacher],
+        fail: bool = False,
     ) -> None:
         self.years = years
         self.groups = groups
         self.teachers = teachers
+        self.fail = fail
         self.calls: Counter[str] = Counter()
+
+    def _maybe_fail(self) -> None:
+        if self.fail:
+            raise EiosApiError("unavailable")
 
     async def get_years(self) -> list[str]:
         self.calls["years"] += 1
+        self._maybe_fail()
         return list(self.years)
 
     async def get_groups(self, year: str | None = None) -> list[Group]:
         self.calls["groups"] += 1
+        self._maybe_fail()
         return list(self.groups)
 
     async def get_teachers(self) -> list[Teacher]:
         self.calls["teachers"] += 1
+        self._maybe_fail()
         return list(self.teachers)

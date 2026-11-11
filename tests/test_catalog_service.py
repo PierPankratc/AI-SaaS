@@ -120,3 +120,20 @@ async def test_service_hierarchy_and_search() -> None:
     ] == ["26-ПМбо-1", "26-ПМбо-2"]
 
     assert [t.id for t in await service.search_teachers("федоров")] == [3]
+
+
+async def test_fallback_to_backup_when_api_down() -> None:
+    fake = FakeRedis()
+    cache = RedisCache(fake, catalog_ttl=10, fallback_ttl=1000)
+    groups = _groups()
+    await cache.set_catalog(
+        "groups:2026-2027",
+        [group.model_dump(mode="json") for group in groups],
+    )
+    fake.advance(11)  # основной ключ истёк, резерв ещё жив
+
+    client = FakeEiosClient(["2026-2027"], groups, [], fail=True)
+    service = CatalogService(client, cache)
+
+    result = await service.get_groups("2026-2027")
+    assert len(result) == 6

@@ -100,11 +100,22 @@ class RedisCache:
     def _catalog_key(self, name: str) -> str:
         return f"{self.prefix}:{CATALOG_PREFIX}:{SCHEMA_VERSION}:{name}"
 
+    def _catalog_backup_key(self, name: str) -> str:
+        return f"{self._catalog_key(name)}:backup"
+
     async def get_catalog(self, name: str) -> Any:
         return await self.get_json(self._catalog_key(name))
 
+    async def get_catalog_backup(self, name: str) -> Any:
+        """Резервная копия справочника (stale-if-error)."""
+        return await self.get_json(self._catalog_backup_key(name))
+
     async def set_catalog(self, name: str, value: Any) -> None:
+        """Сохраняет справочник в основной и резервный ключи."""
         await self.set_json(self._catalog_key(name), value, self.catalog_ttl)
+        await self.set_json(
+            self._catalog_backup_key(name), value, self.fallback_ttl
+        )
 
     # --- расписание (с резервной копией) ---
 
