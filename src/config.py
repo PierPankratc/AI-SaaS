@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Moscow"
     log_level: str = "INFO"
 
+    # --- Безопасность ---
+    rate_limit_messages: int = 20  # максимум сообщений за окно
+    rate_limit_window: int = 10  # окно в секундах
+    max_text_length: int = 512  # максимум длины входящего текста
+    onboarding_ttl: int = 900  # TTL черновика регистрации, 15 минут
+
+    # --- База данных ---
+    db_echo: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

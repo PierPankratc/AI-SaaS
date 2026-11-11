@@ -1,0 +1,70 @@
+"""Ограничение частоты запросов (защита от флуда и DoS).
+
+Два хранилища счётчиков:
+
+* :class:`InMemoryCounterStore` — скользящее окно в памяти одного процесса
+  (используется по умолчанию и в тестах);
+* :class:`RedisCounterStore` — общий счётчик фиксированного окна в Redis,
+  если бот запущен в нескольких инстансах.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any, Protocol
+
+
+class CounterStore(Protocol):
+    async def incr(self, key: str, window: int) -> int:
+        """Увеличивает счётчик и возвращает число попаданий в окне."""
+        ...
+
+
+class InMemoryCounterStore:
+    """Скользящее окно в памяти процесса."""
+
+    def __init__(self, clock=time.monotonic) -> None:
+        self._clock = clock
+        self._hits: dict[str, list[float]] = {}
+
+    async def incr(self, key: str, window: int) -> int:
+        now = self._clock()
+        cutoff = now - window
+        hits = [stamp for stamp in self._hits.get(key, []) if stamp > cutoff]
+        hits.append(now)
+        self._hits[key] = hits
+        return len(hits)
+
+
+class RedisCounterStore:
+    """Фиксированное окно на Redis (общий счётчик для инстансов)."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    async def incr(self, key: str, window: int) -> int:
+        count = int(await self._client.incr(key))
+        if count == 1:
+            await self._client.expire(key, window)
+        return count
+
+
+class RateLimiter:
+    """Проверяет, не превышен ли лимит запросов для ключа."""
+
+    def __init__(
+        self,
+        store: CounterStore,
+        *,
+        limit: int = 20,
+        window: int = 10,
+    ) -> None:
+        if limit < 1 or window < 1:
+            raise ValueError("limit и window должны быть положительными")
+        self._store = store
+        self.limit = limit
+        self.window = window
+
+    async def allow(self, key: str) -> bool:
+        count = await self._store.incr(f"ratelimit:{key}", self.window)
+        return count <= self.limit
