@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # --- ЭИОС КГУ ---
     eios_base_url: str = "https://eios.kosgos.ru"
     eios_proxy_url: str = ""  # прокси, если IP сервера блокируется (код 451)
+    eios_user_agent: str = ""  # переопределить User-Agent (пусто — по умолчанию)
+    eios_browser_headers: bool = False  # браузерные заголовки (Chrome UA/Referer/Origin)
 
     # --- Кэширование (TTL в секундах) ---
     catalog_cache_ttl: int = 86_400  # справочники (институты, группы, преподаватели) — 24 ч

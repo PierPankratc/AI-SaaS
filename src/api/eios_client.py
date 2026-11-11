@@ -27,7 +27,42 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://eios.kosgos.ru"
 DEFAULT_TIMEOUT = 10.0
-USER_AGENT = "VK-EIOS-Schedule-Bot/0.1 (+https://vk.com)"
+
+DEFAULT_USER_AGENT = "VK-EIOS-Schedule-Bot/0.1 (+https://vk.com)"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+REFERER = "https://eios.kosgos.ru/WebApp/"
+ORIGIN = "https://eios.kosgos.ru"
+
+
+def build_headers(
+    *,
+    user_agent: str | None = None,
+    browser_headers: bool = False,
+) -> dict[str, str]:
+    """Собирает HTTP-заголовки запросов к ЭИОС.
+
+    ``browser_headers`` включает браузероподобные заголовки (Chrome UA,
+    Referer, Origin) — иногда помогает обойти WAF, который режет «не браузерные»
+    запросы. IP источника при этом не меняется.
+    """
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    elif browser_headers:
+        headers["User-Agent"] = BROWSER_USER_AGENT
+    else:
+        headers["User-Agent"] = DEFAULT_USER_AGENT
+
+    if browser_headers:
+        headers["Referer"] = REFERER
+        headers["Origin"] = ORIGIN
+    return headers
 
 LIST_YEARS_PATH = "/api/Rasp/ListYears"
 GROUPS_PATH = "/api/raspGrouplist"
@@ -54,6 +89,8 @@ class EiosClient:
         retries: int = 3,
         backoff: float = 0.5,
         proxy: str | None = None,
+        user_agent: str | None = None,
+        browser_headers: bool = False,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -67,10 +104,9 @@ class EiosClient:
             client_kwargs: dict[str, Any] = {
                 "base_url": self.base_url,
                 "timeout": timeout,
-                "headers": {
-                    "User-Agent": USER_AGENT,
-                    "Accept": "application/json",
-                },
+                "headers": build_headers(
+                    user_agent=user_agent, browser_headers=browser_headers
+                ),
             }
             if proxy:
                 client_kwargs["proxy"] = proxy

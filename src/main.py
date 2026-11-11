@@ -66,7 +66,10 @@ async def run() -> None:
     heartbeat_task: asyncio.Task | None = None
     try:
         async with EiosClient(
-            settings.eios_base_url, proxy=settings.eios_proxy_url or None
+            settings.eios_base_url,
+            proxy=settings.eios_proxy_url or None,
+            user_agent=settings.eios_user_agent or None,
+            browser_headers=settings.eios_browser_headers,
         ) as eios:
             catalog = CatalogService(eios, cache)
             schedules = ScheduleService(eios, cache, timezone=settings.timezone)

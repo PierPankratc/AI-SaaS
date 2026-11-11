@@ -16,34 +16,62 @@ from src.api.eios_client import EiosApiError, EiosClient
 from src.config import get_settings
 
 
-async def _check() -> int:
-    settings = get_settings()
-    proxy = settings.eios_proxy_url or None
-
-    print(f"EIOS_BASE_URL={settings.eios_base_url}")
-    print(f"proxy={'enabled' if proxy else 'disabled'}")
-
+async def _try(
+    label: str,
+    base_url: str,
+    *,
+    proxy: str | None,
+    browser_headers: bool,
+) -> bool:
     try:
         async with EiosClient(
-            settings.eios_base_url,
+            base_url,
             proxy=proxy,
+            browser_headers=browser_headers,
             retries=1,
             timeout=15,
         ) as client:
             years = await client.get_years()
-            groups = await client.get_groups(years[-1] if years else None)
-            teachers = await client.get_teachers()
     except EiosApiError as exc:
-        print(f"FAIL: {exc}")
-        return 1
+        print(f"[{label}] FAIL: {exc}")
+        return False
     except Exception as exc:  # noqa: BLE001
-        print(f"FAIL: {type(exc).__name__}: {exc}")
-        return 1
+        print(f"[{label}] FAIL: {type(exc).__name__}: {exc}")
+        return False
 
-    print(
-        f"OK: years={years}, groups={len(groups)}, teachers={len(teachers)}"
-    )
-    return 0
+    print(f"[{label}] OK: years={years}")
+    return True
+
+
+async def _check() -> int:
+    settings = get_settings()
+    proxy = settings.eios_proxy_url or None
+    base = settings.eios_base_url
+
+    print(f"EIOS_BASE_URL={base}")
+    print(f"proxy={'enabled' if proxy else 'disabled'}")
+
+    strategies: list[tuple[str, dict]] = [
+        ("bot-UA / direct", {"proxy": None, "browser_headers": False}),
+        ("browser / direct", {"proxy": None, "browser_headers": True}),
+    ]
+    if proxy:
+        strategies.append(
+            ("bot-UA / proxy", {"proxy": proxy, "browser_headers": False})
+        )
+        strategies.append(
+            ("browser / proxy", {"proxy": proxy, "browser_headers": True})
+        )
+
+    ok = False
+    for label, kwargs in strategies:
+        ok = await _try(label, base, **kwargs) or ok
+
+    if ok:
+        print("RESULT: доступ есть (см. успешную стратегию выше)")
+        return 0
+    print("RESULT: ЭИОС недоступен всеми способами")
+    return 1
 
 
 def main() -> None:

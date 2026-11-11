@@ -161,3 +161,23 @@ async def test_451_gives_proxy_hint() -> None:
 async def test_client_accepts_proxy() -> None:
     client = EiosClient(proxy="http://127.0.0.1:8080")
     await client.aclose()
+
+
+async def test_default_user_agent() -> None:
+    client = EiosClient()
+    try:
+        assert "VK-EIOS" in client._client.headers["User-Agent"]
+    finally:
+        await client.aclose()
+
+
+async def test_browser_headers_applied() -> None:
+    client = EiosClient(browser_headers=True)
+    try:
+        assert "Chrome" in client._client.headers["User-Agent"]
+        assert client._client.headers["Referer"].startswith(
+            "https://eios.kosgos.ru"
+        )
+        assert client._client.headers["Origin"] == "https://eios.kosgos.ru"
+    finally:
+        await client.aclose()

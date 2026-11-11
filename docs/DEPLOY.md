@@ -215,6 +215,14 @@ docker compose exec bot python -m src.healthcheck
 # ожидаемо: "OK: years=[...], groups=..., teachers=..."
 ```
 
+Утилита `src.healthcheck` пробует 4 стратегии: UA бота / браузера × напрямую /
+через прокси. По результату:
+
+- `browser / direct` = OK → помогает маскировка заголовков: поставьте
+  `EIOS_BROWSER_HEADERS=true`;
+- OK только `*/proxy` → нужен прокси (заголовки IP не меняют);
+- всё FAIL → блок по IP; заголовки не помогут, нужен резидентный прокси/другой IP.
+
 ## 12. Если `PermissionError: '/app/.vkbottle'`
 
 Значит контейнер запущен на старом образе. Пересоберите без кэша:

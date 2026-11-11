@@ -98,6 +98,9 @@ python -m src.main
 | `REDIS_URL` | DSN Redis | `redis://localhost:6379/0` |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Реквизиты для docker-compose | `postgres` / `postgres` / `vk_schedule` |
 | `EIOS_BASE_URL` | База API ЭИОС | `https://eios.kosgos.ru` |
+| `EIOS_PROXY_URL` | Прокси для ЭИОС (при ошибке 451) | — |
+| `EIOS_BROWSER_HEADERS` | Браузерные заголовки (Chrome UA/Referer/Origin) | `false` |
+| `EIOS_USER_AGENT` | Свой User-Agent для запросов к ЭИОС | — |
 | `CATALOG_CACHE_TTL` | TTL справочников, сек | `86400` |
 | `SCHEDULE_CACHE_TTL` | TTL расписания, сек | `1800` |
 | `SCHEDULE_FALLBACK_TTL` | TTL резерва расписания, сек | `604800` |
