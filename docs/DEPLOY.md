@@ -38,11 +38,35 @@ sudo usermod -aG docker deploy
 
 Перезайдите под `deploy`, чтобы применилась группа `docker`.
 
-## 3. Код и конфигурация
+## 3. Код и конфигурация (приватный GitHub-репозиторий)
+
+Репозиторий приватный, поэтому клонируем по SSH через **deploy key**
+(доступ только на чтение и только к этому репозиторию):
 
 ```bash
 su - deploy
-git clone <URL_РЕПОЗИТОРИЯ> app && cd app
+ssh-keygen -t ed25519 -C "vps-aissas-deploy" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+Скопируйте вывод и добавьте ключ в GitHub:
+**Repository → Settings → Deploy keys → Add deploy key**
+(галочку «Allow write access» оставьте выключенной). Проверка и клон:
+
+```bash
+ssh -T git@github.com          # ожидаемо: "successfully authenticated"
+git clone git@github.com:PierPankratc/AI-SaaS.git app
+cd app
+```
+
+Альтернатива по HTTPS (если SSH недоступен) — personal access token с правом `repo`:
+```bash
+git clone https://<LOGIN>:<TOKEN>@github.com/PierPankratc/AI-SaaS.git app
+```
+Не храните токен в истории команд — используйте credential helper.
+
+Затем `.env`:
+```bash
 cp .env.example .env
 chmod 600 .env
 nano .env
