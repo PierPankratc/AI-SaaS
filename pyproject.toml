@@ -15,6 +15,7 @@ dependencies = [
     "redis>=5.0,<6",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.2,<3",
+    "sentry-sdk>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,7 @@ dev = [
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.23,<1",
     "pytest-cov>=5.0,<6",
+    "aiosqlite>=0.20",
 ]
 
 [tool.setuptools.packages.find]

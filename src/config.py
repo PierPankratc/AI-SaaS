@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # --- База данных ---
     db_echo: bool = False
 
+    # --- Мониторинг и логирование ошибок ---
+    environment: str = "production"  # окружение для Sentry
+    sentry_dsn: str = ""  # если пусто — Sentry отключён
+    heartbeat_url: str = ""  # URL пинга (healthchecks.io и т.п.)
+    heartbeat_interval: int = 300  # период пинга в секундах
+
 
 @lru_cache
 def get_settings() -> Settings:
