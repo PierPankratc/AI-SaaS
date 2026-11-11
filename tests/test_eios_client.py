@@ -145,3 +145,19 @@ async def test_api_state_error_raises() -> None:
     async with create_client(handler) as client:
         with pytest.raises(EiosApiError):
             await client.get_teachers()
+
+
+async def test_451_gives_proxy_hint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(451)
+
+    async with create_client(handler) as client:
+        with pytest.raises(EiosApiError) as excinfo:
+            await client.get_years()
+
+    assert "451" in str(excinfo.value)
+
+
+async def test_client_accepts_proxy() -> None:
+    client = EiosClient(proxy="http://127.0.0.1:8080")
+    await client.aclose()

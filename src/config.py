@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     # --- VK ---
-    vk_bot_token: str  # Токен сообщества ВКонтакте (long-poll), обязателен
+    vk_bot_token: str = ""  # Токен сообщества ВКонтакте (проверяется при запуске)
 
     # --- Базы данных и кэш ---
     database_url: str = (
@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # --- ЭИОС КГУ ---
     eios_base_url: str = "https://eios.kosgos.ru"
+    eios_proxy_url: str = ""  # прокси, если IP сервера блокируется (код 451)
 
     # --- Кэширование (TTL в секундах) ---
     catalog_cache_ttl: int = 86_400  # справочники (институты, группы, преподаватели) — 24 ч

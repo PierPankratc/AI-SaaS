@@ -4,7 +4,7 @@ import asyncio
 import logging
 from contextlib import suppress
 
-from src.api.eios_client import EiosClient
+from src.api.eios_client import EiosApiError, EiosClient
 from src.bot.bot import build_bot
 from src.bot.core import BotCore
 from src.bot.drafts import RedisDrafts
@@ -35,6 +35,9 @@ async def run() -> None:
     logger = logging.getLogger(LOGGER_NAME)
     setup_sentry(settings.sentry_dsn, settings.environment)
 
+    if settings.eios_proxy_url:
+        logger.info("Запросы к ЭИОС будут выполняться через прокси")
+
     if not settings.vk_bot_token or settings.vk_bot_token.startswith("your_"):
         raise RuntimeError("Укажите реальный VK_BOT_TOKEN в .env")
 
@@ -62,12 +65,16 @@ async def run() -> None:
 
     heartbeat_task: asyncio.Task | None = None
     try:
-        async with EiosClient(settings.eios_base_url) as eios:
+        async with EiosClient(
+            settings.eios_base_url, proxy=settings.eios_proxy_url or None
+        ) as eios:
             catalog = CatalogService(eios, cache)
             schedules = ScheduleService(eios, cache, timezone=settings.timezone)
 
             try:
                 await catalog.warmup()
+            except EiosApiError as exc:
+                logger.warning("ЭИОС недоступен при прогреве кэша: %s", exc)
             except Exception:  # noqa: BLE001 - бот должен запуститься и без прогрева
                 logger.warning(
                     "Не удалось прогреть кэш справочников", exc_info=True

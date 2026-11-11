@@ -174,6 +174,10 @@ pytest -q        # 80 тестов: API, кэш, каталог, расписа�
 - **`vkbottle` не установлен**: `pip install vkbottle` или запуск через Docker.
 - **Нет расписания**: проверьте доступность `https://eios.kosgos.ru` и логи
   (используется резервная копия из кэша при сбоях).
+- **Ошибка 451 при обращении к ЭИОС**: IP сервера заблокирован (гео/датацентр).
+  Разместите бота на VPS в РФ или задайте `EIOS_PROXY_URL` (прокси с российским IP).
+- **`PermissionError: '/app/.vkbottle'`**: контейнер собран старым образом —
+  `docker compose build --no-cache bot && docker compose up -d --force-recreate bot`.
 
 
 

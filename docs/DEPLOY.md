@@ -185,3 +185,45 @@ docker compose exec redis redis-cli ping
 docker compose exec postgres pg_isready -U postgres
 ```
 
+## 11. Если ЭИОС возвращает 451 (IP заблокирован)
+
+`https://eios.kosgos.ru` может блокировать зарубежные/датацентровые IP — ответ
+`451 Unavailable For Legal Reasons`. В логах это выглядит так:
+
+```
+451 <html>...
+Не удалось прогреть кэш справочников
+```
+
+Решения:
+
+1. Разместить бота на VPS **в РФ**.
+2. Настроить прокси с российским **резидентным** IP и указать его в `.env`:
+   ```
+   EIOS_PROXY_URL=http://user:pass@203.0.113.10:8080
+   ```
+   Поддерживаются `http://`, `https://` и `socks5://` — пакет `httpx[socks]`
+   уже включён в зависимости. Датацентровые IP тоже могут блокироваться,
+   поэтому лучше резидентный/мобильный прокси.
+3. Поднять на сервере WireGuard/VPN с российским выходом (весь трафик через РФ).
+
+Проверка после настройки:
+
+```bash
+docker compose up -d
+docker compose exec bot python -m src.healthcheck
+# ожидаемо: "OK: years=[...], groups=..., teachers=..."
+```
+
+## 12. Если `PermissionError: '/app/.vkbottle'`
+
+Значит контейнер запущен на старом образе. Пересоберите без кэша:
+
+```bash
+docker compose build --no-cache bot
+docker compose up -d --force-recreate bot
+docker compose exec bot ls -ld /app /app/.vkbottle
+docker compose exec bot touch /app/.vkbottle/_check && echo "writable" && rm /app/.vkbottle/_check
+```
+
+

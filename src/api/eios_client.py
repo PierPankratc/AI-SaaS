@@ -53,17 +53,28 @@ class EiosClient:
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = 3,
         backoff: float = 0.5,
+        proxy: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.retries = max(1, retries)
         self.backoff = backoff
         self._external_client = client
-        self._client = client or httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=timeout,
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-        )
+
+        if client is not None:
+            self._client = client
+        else:
+            client_kwargs: dict[str, Any] = {
+                "base_url": self.base_url,
+                "timeout": timeout,
+                "headers": {
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                },
+            }
+            if proxy:
+                client_kwargs["proxy"] = proxy
+            self._client = httpx.AsyncClient(**client_kwargs)
 
     async def __aenter__(self) -> "EiosClient":
         return self
@@ -105,6 +116,12 @@ class EiosClient:
                         attempt,
                         self.retries,
                         response.status_code,
+                    )
+                elif response.status_code == 451:
+                    raise EiosApiError(
+                        "ЭИОС вернул 451: доступ с этого IP заблокирован "
+                        "(настройте прокси с российским IP — EIOS_PROXY_URL)",
+                        status_code=451,
                     )
                 elif response.status_code >= 400:
                     raise EiosApiError(
