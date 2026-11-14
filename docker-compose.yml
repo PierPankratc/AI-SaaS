@@ -1,60 +1,14 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-vk_schedule}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    # Порт доступен только с самого сервера (не наружу).
-    ports:
-      - "127.0.0.1:5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vk_schedule}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   bot:
     build: .
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     env_file:
       - .env
     environment:
-      # Внутри Docker база и Redis доступны по именам сервисов.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vk_schedule}
-      REDIS_URL: redis://redis:6379/0
+      # Единый файл SQLite с профилями, черновиками и расписанием.
+      SQLITE_DB_PATH: /app/data/bot.db
+    volumes:
+      - bot_data:/app/data
     logging:
       driver: json-file
       options:
@@ -62,6 +16,4 @@ services:
         max-file: "3"
 
 volumes:
-  postgres_data:
-  redis_data:
-
+  bot_data:

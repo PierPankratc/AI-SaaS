@@ -1,10 +1,12 @@
-"""Тесты сервиса расписания: фильтрация дня/недели, кэш, резерв и текст."""
+"""Тесты сервиса расписания: SQLite, догрузка из ЭИОС и форматирование."""
 
 from datetime import date
 
-from src.api.eios_client import EiosApiError
+import pytest_asyncio
+
 from src.api.schemas import Schedule
-from src.cache.redis_cache import RedisCache
+from src.db.schedule_repository import ScheduleRepository, SemesterKey
+from src.db.sqlite_db import SqliteDatabase
 from src.services.schedule_service import (
     Role,
     ScheduleService,
@@ -14,7 +16,6 @@ from src.services.schedule_service import (
     split_message,
     week_monday,
 )
-from tests.fakes import FakeRedis
 
 
 def _lesson(
@@ -75,28 +76,39 @@ def make_schedule() -> Schedule:
             "info": {
                 "group": {"name": "26-ПМбо-1", "groupID": 8948, "year": "2026-2027"},
                 "prepod": {"name": "", "userID": None},
+                "curSem": 1,
             },
         }
     )
 
 
-class FakeScheduleClient:
-    def __init__(self, schedule: Schedule, fail: bool = False) -> None:
-        self.schedule = schedule
-        self.fail = fail
-        self.calls = 0
+@pytest_asyncio.fixture
+async def repository(tmp_path):
+    database = SqliteDatabase(str(tmp_path / "schedule.db"))
+    await database.create_schema()
+    try:
+        yield ScheduleRepository(database.session_factory)
+    finally:
+        await database.dispose()
 
-    async def get_group_schedule(self, group_id: int, sdate=None) -> Schedule:
-        self.calls += 1
-        if self.fail:
-            raise EiosApiError("unavailable")
-        return self.schedule
 
-    async def get_teacher_schedule(self, teacher_id: int, sdate=None) -> Schedule:
-        self.calls += 1
-        if self.fail:
-            raise EiosApiError("unavailable")
-        return self.schedule
+async def store_week(
+    repository: ScheduleRepository,
+    *,
+    target_id: int = 8948,
+    covered_from: date = date(2026, 11, 9),
+    covered_to: date = date(2026, 11, 15),
+) -> None:
+    schedule = make_schedule()
+    await repository.replace_target_schedule(
+        role=Role.STUDENT.value,
+        target_id=target_id,
+        target_name="26-ПМбо-1",
+        semester=SemesterKey("2026-2027", 1),
+        lessons=schedule.lessons,
+        covered_from=covered_from,
+        covered_to=covered_to,
+    )
 
 
 def test_week_monday() -> None:
@@ -109,12 +121,16 @@ def test_lessons_on_filters_and_sorts() -> None:
     schedule = make_schedule()
     tuesday = lessons_on(schedule.lessons, date(2026, 11, 10))
     assert [lesson.subgroup for lesson in tuesday] == [1, 2, 0]
-    assert [lesson.id for lesson in lessons_on(schedule.lessons, date(2026, 11, 9))] == [1]
+    assert [
+        lesson.id for lesson in lessons_on(schedule.lessons, date(2026, 11, 9))
+    ] == [1]
 
 
 def test_format_day_student() -> None:
     tuesday = lessons_on(make_schedule().lessons, date(2026, 11, 10))
-    text = format_day(tuesday, date(2026, 11, 10), Role.STUDENT, "Группа 26-ПМбо-1")
+    text = format_day(
+        tuesday, date(2026, 11, 10), Role.STUDENT, "Группа 26-ПМбо-1"
+    )
 
     assert "Вторник" in text
     assert "п/г 1" in text and "п/г 2" in text
@@ -149,39 +165,37 @@ def test_split_message_respects_limit() -> None:
     assert "\n".join(parts) == text
 
 
-async def test_week_cached_within_same_week() -> None:
-    client = FakeScheduleClient(make_schedule())
-    service = ScheduleService(client, RedisCache(FakeRedis()))
+async def test_week_reads_from_sqlite(repository) -> None:
+    await store_week(repository)
+    service = ScheduleService(repository)
 
-    await service.get_week(Role.STUDENT, 1, date(2026, 11, 9))
-    await service.get_week(Role.STUDENT, 1, date(2026, 11, 11))
+    schedule = await service.get_week(Role.STUDENT, 8948, date(2026, 11, 10))
 
-    assert client.calls == 1
-
-
-async def test_fallback_returns_stale_on_api_error() -> None:
-    fake = FakeRedis()
-    cache = RedisCache(fake, schedule_ttl=30, fallback_ttl=1000)
-    client = FakeScheduleClient(make_schedule())
-    service = ScheduleService(client, cache)
-
-    await service.get_week(Role.STUDENT, 1, date(2026, 11, 9))
-    fake.advance(31)  # основной ключ истёк, резерв ещё жив
-    client.fail = True
-
-    result = await service.get_week(Role.STUDENT, 1, date(2026, 11, 9))
-    assert len(result.lessons) == 4
+    assert len(schedule.lessons) == 4
+    assert schedule.info is not None
+    assert schedule.info.group is not None
+    assert schedule.info.group.name == "26-ПМбо-1"
 
 
-async def test_day_and_week_text() -> None:
-    service = ScheduleService(
-        FakeScheduleClient(make_schedule()), RedisCache(FakeRedis())
-    )
+async def test_empty_database_returns_no_lessons(repository) -> None:
+    service = ScheduleService(repository)
+
+    text = await service.day_text(Role.STUDENT, 8948, date(2026, 11, 9))
+
+    assert "Занятий нет" in text
+
+
+async def test_day_and_week_text(repository) -> None:
+    await store_week(repository)
+    service = ScheduleService(repository)
 
     day_text = await service.day_text(
         Role.STUDENT, 8948, date(2026, 11, 10), title="Группа 26-ПМбо-1"
     )
     assert "Вторник" in day_text
 
-    week_text = await service.week_text(Role.STUDENT, 8948, date(2026, 11, 9))
+    week_text = await service.week_text(
+        Role.STUDENT, 8948, date(2026, 11, 9)
+    )
     assert "Понедельник" in week_text and "Вторник" in week_text
+

@@ -22,22 +22,20 @@ class Settings(BaseSettings):
     # --- VK ---
     vk_bot_token: str = ""  # Токен сообщества ВКонтакте (проверяется при запуске)
 
-    # --- Базы данных и кэш ---
-    database_url: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/vk_schedule"
-    )
-    redis_url: str = "redis://localhost:6379/0"
+    # --- Локальная база данных (SQLite внутри проекта) ---
+    sqlite_db_path: str = "data/bot.db"  # профили, черновики, расписание
+    db_echo: bool = False  # логировать SQL (отладка)
+
+    # --- Синхронизация семестра из ЭИОС (только CLI) ---
+    schedule_sync_concurrency: int = 1  # ЭИОС режет частые запросы (429)
+    schedule_sync_min_interval: int = 3_600  # не пересинхронизировать чаще, сек
+    schedule_sync_request_delay: float = 3.0  # пауза между запросами, сек
 
     # --- ЭИОС КГУ ---
     eios_base_url: str = "https://eios.kosgos.ru"
     eios_proxy_url: str = ""  # прокси, если IP сервера блокируется (код 451)
     eios_user_agent: str = ""  # переопределить User-Agent (пусто — по умолчанию)
     eios_browser_headers: bool = False  # браузерные заголовки (Chrome UA/Referer/Origin)
-
-    # --- Кэширование (TTL в секундах) ---
-    catalog_cache_ttl: int = 86_400  # справочники (институты, группы, преподаватели) — 24 ч
-    schedule_cache_ttl: int = 1_800  # расписание — 30 мин
-    schedule_fallback_ttl: int = 604_800  # резервная копия расписания — 7 суток
 
     # --- Прочее ---
     timezone: str = "Europe/Moscow"
@@ -48,9 +46,6 @@ class Settings(BaseSettings):
     rate_limit_window: int = 10  # окно в секундах
     max_text_length: int = 512  # максимум длины входящего текста
     onboarding_ttl: int = 900  # TTL черновика регистрации, 15 минут
-
-    # --- База данных ---
-    db_echo: bool = False
 
     # --- Мониторинг и логирование ошибок ---
     environment: str = "production"  # окружение для Sentry

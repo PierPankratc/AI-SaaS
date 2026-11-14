@@ -1,26 +1,29 @@
-"""Сервис расписания: загрузка на день/неделю, кэш с резервом и
-форматирование текста для сообщений ВКонтакте.
+"""Сервис расписания: чтение локальной SQLite и форматирование текста.
 
-Расписание всегда запрашивается с параметром ``sdate`` (понедельник нужной
-недели): без него API ЭИОС отдаёт весь семестр. Текстовые «экраны»
-рассчитаны на навигацию кнопками («На сегодня», «На завтра», «На эту
-неделю», «Сменить профиль») — ввод текста нужен только для фамилии.
+Бот не обращается к ЭИОС: расписание семестра заранее скачивается
+CLI-утилитой ``python -m src.tools.sync_schedule`` в локальную базу
+(``data/bot.db``). Текстовые «экраны» рассчитаны на навигацию кнопками
+(«На сегодня», «На завтра», «На эту неделю», «Сменить профиль»).
 """
 
 from __future__ import annotations
 
-import logging
 from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
-from src.api.eios_client import EiosApiError
-from src.api.schemas import Lesson, Schedule
-
-logger = logging.getLogger(__name__)
+from src.api.schemas import (
+    Lesson,
+    Schedule,
+    ScheduleGroupInfo,
+    ScheduleInfo,
+    ScheduleTeacherInfo,
+)
 
 DEFAULT_TIMEZONE = "Europe/Moscow"
+
+
 MAX_MESSAGE_LEN = 4000
 
 WEEKDAYS = (
@@ -176,16 +179,14 @@ def split_message(text: str, limit: int = MAX_MESSAGE_LEN) -> list[str]:
 
 
 class ScheduleService:
-    """Загрузка расписания дня/недели с кэшем Redis и резервом."""
+    """Расписание дня/недели из локальной SQLite (бот работает офлайн)."""
 
     def __init__(
         self,
-        client: Any,
-        cache: Any,
+        repository: Any,
         timezone: str = DEFAULT_TIMEZONE,
     ) -> None:
-        self._client = client
-        self._cache = cache
+        self._repository = repository
         self._tz = ZoneInfo(timezone)
 
     def today(self) -> date:
@@ -195,38 +196,14 @@ class ScheduleService:
     def tomorrow(self) -> date:
         return self.today() + timedelta(days=1)
 
-    def _cache_key(self, role: Role, target_id: int, monday: date) -> str:
-        return f"{role.value}:{target_id}:{monday.isoformat()}"
-
     async def get_week(self, role: Role, target_id: int, day: date) -> Schedule:
-        """Расписание на неделю, содержащую ``day`` (с кэшем и резервом)."""
+        """Расписание на неделю, содержащую ``day`` (только из SQLite)."""
         monday = week_monday(day)
-        key = self._cache_key(role, target_id, monday)
-
-        cached = await self._cache.get_schedule(key)
-        if cached is not None:
-            return Schedule.model_validate(cached)
-
-        try:
-            if role is Role.STUDENT:
-                schedule = await self._client.get_group_schedule(
-                    target_id, sdate=monday
-                )
-            else:
-                schedule = await self._client.get_teacher_schedule(
-                    target_id, sdate=monday
-                )
-        except EiosApiError:
-            backup = await self._cache.get_schedule_backup(key)
-            if backup is None:
-                raise
-            logger.warning(
-                "ЭИОС недоступен, используется резервное расписание: %s", key
-            )
-            return Schedule.model_validate(backup)
-
-        await self._cache.set_schedule(key, schedule.model_dump(mode="json"))
-        return schedule
+        sunday = monday + timedelta(days=6)
+        lessons = await self._repository.get_lessons(
+            role.value, target_id, monday, sunday
+        )
+        return await self._build_schedule(role, target_id, lessons)
 
     async def get_day(
         self,
@@ -263,3 +240,19 @@ class ScheduleService:
         schedule = await self.get_week(role, target_id, day)
         resolved_title = title or default_title(role, schedule)
         return format_week(schedule, role, resolved_title)
+
+    # --- внутренняя реализация ---
+
+    async def _build_schedule(
+        self, role: Role, target_id: int, lessons: list[Lesson]
+    ) -> Schedule:
+        name = await self._repository.get_target_name(role.value, target_id)
+        info: ScheduleInfo | None = None
+        if name:
+            if role is Role.STUDENT:
+                info = ScheduleInfo(group=ScheduleGroupInfo(name=name))
+            else:
+                info = ScheduleInfo(teacher=ScheduleTeacherInfo(name=name))
+        return Schedule(lessons=lessons, info=info)
+
+

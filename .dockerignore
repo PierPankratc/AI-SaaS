@@ -13,3 +13,7 @@ tests
 docs
 agents
 *.md
+# Не встраиваем локальную базу с персональными данными в образ.
+data/*.db
+data/*.db-wal
+data/*.db-shm

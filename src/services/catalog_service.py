@@ -1,16 +1,14 @@
 """Сервис каталога ЭИОС: иерархия институтов/ступеней/курсов/групп и
-поиск преподавателей поверх кэша Redis.
+поиск преподавателей по локальной базе данных.
 
-Чистые функции (``build_faculties``, ``available_levels``, ``search_teachers``
-и т.д.) не зависят от сети и Redis — их удобно тестировать отдельно.
+Справочники хранятся в SQLite (``groups``, ``teachers``, ``academic_years``)
+и заполняются CLI-синхронизацией. Бот читает их без сетевых запросов.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Iterable
 
-from src.api.eios_client import EiosApiError, EiosClient
 from src.api.schemas import (
     LEVEL_ORDER,
     EducationLevel,
@@ -18,8 +16,6 @@ from src.api.schemas import (
     Group,
     Teacher,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def normalize_person_name(text: str) -> str:
@@ -129,26 +125,17 @@ def search_teachers(
 
 
 class CatalogService:
-    """Доступ к справочникам ЭИОС с кэшированием в Redis."""
+    """Справочники ЭИОС, сохранённые в локальной SQLite.
 
-    def __init__(self, client: Any, cache: Any) -> None:
-        self._client: EiosClient = client
-        self._cache = cache
+    Сетевых запросов нет: данные готовит CLI-синхронизация
+    (``python -m src.tools.sync_schedule``).
+    """
+
+    def __init__(self, repository: Any) -> None:
+        self._repository = repository
 
     async def get_years(self) -> list[str]:
-        cached = await self._cache.get_catalog("years")
-        if cached is not None:
-            return [str(year) for year in cached]
-        try:
-            years = await self._client.get_years()
-        except EiosApiError:
-            backup = await self._cache.get_catalog_backup("years")
-            if backup is None:
-                raise
-            logger.warning("ЭИОС недоступен, учебные годы из резервного кэша")
-            return [str(year) for year in backup]
-        await self._cache.set_catalog("years", years)
-        return years
+        return await self._repository.get_years()
 
     async def get_current_year(self) -> str | None:
         """Последний (актуальный) учебный год."""
@@ -156,51 +143,12 @@ class CatalogService:
         return years[-1] if years else None
 
     async def get_groups(self, year: str | None = None) -> list[Group]:
-        year = year or await self.get_current_year()
-        key = f"groups:{year}"
-        cached = await self._cache.get_catalog(key)
-        if cached is not None:
-            return [Group.model_validate(item) for item in cached]
-
-        try:
-            groups = await self._client.get_groups(year)
-        except EiosApiError:
-            backup = await self._cache.get_catalog_backup(key)
-            if backup is None:
-                raise
-            logger.warning("ЭИОС недоступен, группы из резервного кэша: %s", key)
-            return [Group.model_validate(item) for item in backup]
-
-        await self._cache.set_catalog(
-            key, [group.model_dump(mode="json") for group in groups]
-        )
-        return groups
+        return await self._repository.get_groups(year)
 
     async def get_teachers(self) -> list[Teacher]:
-        cached = await self._cache.get_catalog("teachers")
-        if cached is not None:
-            return [Teacher.model_validate(item) for item in cached]
+        return await self._repository.get_teachers()
 
-        try:
-            teachers = await self._client.get_teachers()
-        except EiosApiError:
-            backup = await self._cache.get_catalog_backup("teachers")
-            if backup is None:
-                raise
-            logger.warning("ЭИОС недоступен, преподаватели из резервного кэша")
-            return [Teacher.model_validate(item) for item in backup]
 
-        await self._cache.set_catalog(
-            "teachers", [teacher.model_dump(mode="json") for teacher in teachers]
-        )
-        return teachers
-
-    async def warmup(self) -> None:
-        """Прогревает кэш справочников (вызывается при старте бота)."""
-        await self.get_years()
-        await self.get_groups()
-        await self.get_teachers()
-        logger.info("Кэш справочников ЭИОС прогрет")
 
     # --- иерархия для сценария регистрации ---
 

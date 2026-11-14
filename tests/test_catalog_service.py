@@ -1,7 +1,10 @@
-"""Тесты сервиса каталога и поиска преподавателей."""
+"""Тесты сервиса каталога: чтение SQLite и поиск преподавателей."""
+
+import pytest_asyncio
 
 from src.api.schemas import EducationLevel, Group, parse_groups, parse_teachers
-from src.cache.redis_cache import RedisCache
+from src.db.schedule_repository import ScheduleRepository
+from src.db.sqlite_db import SqliteDatabase
 from src.services.catalog_service import (
     CatalogService,
     available_courses,
@@ -11,7 +14,6 @@ from src.services.catalog_service import (
     search_teachers,
     select_groups,
 )
-from tests.fakes import FakeEiosClient, FakeRedis
 
 RAW_GROUPS = [
     {"name": "26-ПМбо-1", "id": 1, "kurs": 1, "facul": "ИВИТШ", "yearName": "2026-2027", "facultyID": 36},
@@ -36,11 +38,27 @@ def _groups() -> list[Group]:
     return parse_groups(RAW_GROUPS)
 
 
-def _service() -> CatalogService:
-    client = FakeEiosClient(
-        ["2026-2027"], _groups(), parse_teachers(RAW_TEACHERS)
+@pytest_asyncio.fixture
+async def repository(tmp_path):
+    database = SqliteDatabase(str(tmp_path / "schedule.db"))
+    await database.create_schema()
+    try:
+        yield ScheduleRepository(database.session_factory)
+    finally:
+        await database.dispose()
+
+
+def _service(repository: ScheduleRepository) -> CatalogService:
+    return CatalogService(repository)
+
+
+async def seed(repository: ScheduleRepository) -> None:
+    await repository.save_catalog(
+        years=["2026-2027"],
+        groups=_groups(),
+        teachers=parse_teachers(RAW_TEACHERS),
+        year="2026-2027",
     )
-    return CatalogService(client, RedisCache(FakeRedis()))
 
 
 def test_normalize_person_name() -> None:
@@ -93,20 +111,21 @@ def test_search_does_not_match_patronymic() -> None:
     assert search_teachers(teachers, "петров") == []
 
 
-async def test_service_caches_groups() -> None:
-    client = FakeEiosClient(["2026-2027"], _groups(), parse_teachers(RAW_TEACHERS))
-    service = CatalogService(client, RedisCache(FakeRedis()))
+async def test_service_reads_catalog_from_sqlite(repository) -> None:
+    await seed(repository)
+    service = CatalogService(repository)
 
     groups = await service.get_groups()
     assert len(groups) == 6
-    assert client.calls["groups"] == 1
 
-    await service.get_groups()  # второй раз — из кэша
-    assert client.calls["groups"] == 1
+    # Повторное чтение не меняет данные и не требует сети.
+    assert len(await service.get_groups()) == 6
+    assert await service.get_years() == ["2026-2027"]
 
 
-async def test_service_hierarchy_and_search() -> None:
-    service = _service()
+async def test_service_hierarchy_and_search(repository) -> None:
+    await seed(repository)
+    service = _service(repository)
 
     faculties = await service.get_faculties()
     assert {f.name for f in faculties} == {"АСП", "ИВИТШ", "ИУЭФ"}
@@ -122,18 +141,17 @@ async def test_service_hierarchy_and_search() -> None:
     assert [t.id for t in await service.search_teachers("федоров")] == [3]
 
 
-async def test_fallback_to_backup_when_api_down() -> None:
-    fake = FakeRedis()
-    cache = RedisCache(fake, catalog_ttl=10, fallback_ttl=1000)
-    groups = _groups()
-    await cache.set_catalog(
-        "groups:2026-2027",
-        [group.model_dump(mode="json") for group in groups],
-    )
-    fake.advance(11)  # основной ключ истёк, резерв ещё жив
+async def test_empty_catalog_returns_empty_lists(repository) -> None:
+    service = CatalogService(repository)
 
-    client = FakeEiosClient(["2026-2027"], groups, [], fail=True)
-    service = CatalogService(client, cache)
+    assert await service.get_years() == []
+    assert await service.get_groups() == []
+    assert await service.get_teachers() == []
+    assert await service.get_faculties() == []
 
-    result = await service.get_groups("2026-2027")
-    assert len(result) == 6
+
+async def test_years_fallback_to_saved_groups(repository) -> None:
+    await repository.save_groups(_groups(), year="2026-2027")
+    service = CatalogService(repository)
+
+    assert await service.get_years() == ["2026-2027"]

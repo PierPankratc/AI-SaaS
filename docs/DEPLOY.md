@@ -76,27 +76,70 @@ nano .env
 
 ```
 VK_BOT_TOKEN=<новый токен сообщества>
-POSTGRES_PASSWORD=<длинный случайный пароль>
 ENVIRONMENT=production
 SENTRY_DSN=<dsn sentry или пусто>
 HEARTBEAT_URL=<ping url healthchecks.io или пусто>
 ```
 
-Сгенерировать пароль: `openssl rand -base64 24`.
+Опционально: `SQLITE_DB_PATH=/app/data/bot.db` (значение по умолчанию в compose),
+`EIOS_PROXY_URL=...` — только для CLI-синхронизации.
 
-> `.env` не должен попадать в git. Порты БД/Redis в compose открыты только на
-> `127.0.0.1` и наружу не публикуются.
+> `.env` не должен попадать в git. Вся информация хранится в одной SQLite-базе
+> `data/bot.db` (volume `bot_data`); PostgreSQL и Redis больше не используются.
+
 
 ## 4. Запуск
 
+Сначала подготовьте базу с расписанием. Вариант A — сервер имеет доступ к ЭИОС
+(напрямую или через `EIOS_PROXY_URL`):
+
 ```bash
 docker compose up -d --build
-docker compose ps
+docker compose exec bot python -m src.tools.sync_schedule --all-groups
+docker compose exec bot python -m src.tools.sync_schedule --skip-catalog --teachers-from-groups
 docker compose logs -f bot
 ```
 
-Ожидаемые строки в логах: «Кэш справочников ЭИОС прогрет» и
-«Запуск бота ВК (long poll)…». Таблица `users` создаётся автоматически.
+Вариант B — сервер **не имеет доступа** к ЭИОС (рекомендуется для заблокированных
+IP): соберите `data/bot.db` на машине с доступом к сайту и перенесите файл.
+
+```bash
+# на локальной машине
+python -m src.tools.sync_schedule --year 2026-2027 --all-groups
+python -m src.tools.sync_schedule --skip-catalog --teachers-from-groups
+scp data/bot.db deploy@SERVER:~/app/data/bot.db
+
+# на сервере
+cd ~/app
+docker compose up -d --build
+docker compose cp data/bot.db bot:/app/data/bot.db
+docker compose exec -u root bot chown 10001:10001 /app/data/bot.db
+docker compose restart bot
+docker compose logs -f bot
+```
+
+При обновлениях не перезаписывайте боевую базу «с нуля» — сначала заберите её
+с профилями, обновите расписание и верните обратно:
+
+```bash
+docker compose cp bot:/app/data/bot.db ./bot.db
+python -m src.tools.sync_schedule --db ./bot.db --all-groups --force
+python -m src.tools.sync_schedule --db ./bot.db --skip-catalog --teachers-from-groups
+docker compose cp ./bot.db bot:/app/data/bot.db
+docker compose exec -u root bot chown 10001:10001 /app/data/bot.db
+docker compose restart bot
+```
+
+Ожидаемые строки в логах: «Локальная база: N пар, M целей…» (или предупреждение
+о пустой базе) и «Запуск бота ВК (long poll, офлайн-режим)…». Таблицы создаются
+автоматически при старте.
+
+> ЭИОС ограничивает частоту запросов (~30/мин). Для первой массовой загрузки
+> используйте `--concurrency 1` и `SCHEDULE_SYNC_REQUEST_DELAY=3.0`; клиент
+> сам повторяет `429` с учётом `Retry-After`. Повторный запуск продолжит
+> с места остановки: успешные и пустые цели пропускаются.
+
+
 
 ## 5. Обновление версии
 
@@ -149,31 +192,44 @@ Long-poll бот не слушает порт, поэтому внешний а�
 Promtail → Loki, дашборды в Grafana. Для одного бота обычно достаточно
 Sentry + healthchecks.io.
 
-## 8. Бэкапы PostgreSQL
+## 8. Бэкапы SQLite
+
+В `data/bot.db` (volume `bot_data`) лежит всё: профили пользователей, черновики
+и расписание семестра.
 
 ```bash
-# ручной бэкап
-docker compose exec -T postgres pg_dump -U postgres vk_schedule \
-  | gzip > backup_$(date +%F).sql.gz
+# копия «живой» базы через SQLite backup API (без остановки бота)
+docker compose exec bot python -c "import sqlite3; sqlite3.connect('/app/data/bot.db').backup(sqlite3.connect('/app/data/backup.db'))"
+docker compose cp bot:/app/data/backup.db ./bot_backup_$(date +%F).db
 
 # cron (ежедневно в 3:00)
 0 3 * * * cd /home/deploy/app && \
-  docker compose exec -T postgres pg_dump -U postgres vk_schedule \
-  | gzip > /home/deploy/backup_$(date +\%F).sql.gz
+  docker compose exec -T bot python -c "import sqlite3; sqlite3.connect('/app/data/bot.db').backup(sqlite3.connect('/app/data/backup.db'))" && \
+  docker compose cp bot:/app/data/backup.db /home/deploy/bot_backup_$(date +\%F).db
 ```
 
-Храните бэкапы вне сервера (S3/другой хост). Восстановление:
+Восстановление:
 
 ```bash
-gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U postgres -d vk_schedule
+docker compose stop bot
+docker compose cp ./bot_backup_2026-11-14.db bot:/app/data/bot.db
+docker compose exec -u root bot chown 10001:10001 /app/data/bot.db
+docker compose start bot
 ```
+
+> При копировании файла вручную останавливайте бота: при включённом WAL рядом
+> могут быть `bot.db-wal` и `bot.db-shm`.
+
 
 ## 9. Безопасность
 
-- Не публикуйте порты 5432/6379 наружу (в compose — только `127.0.0.1`).
-- Сильные пароли, `.env` с правами `600`, вход по SSH-ключам, без root-логина.
+- Наружу открыт только SSH (и HTTP/HTTPS, если понадобятся); база — локальный
+  файл, сетевых портов у неё нет.
+- `.env` с правами `600`, вход по SSH-ключам, без root-логина.
 - `ufw` + fail2ban, регулярные обновления: `sudo apt upgrade`.
 - Перевыпускайте токен ВК при подозрении на утечку.
+- `data/bot.db` содержит персональные данные (VK ID, группа) — не публикуйте
+  файл и храните бэкапы в защищённом месте.
 - `docker compose config` раскрывает значения переменных — не публикуйте его вывод.
 
 ## 10. Диагностика
@@ -181,8 +237,10 @@ gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U postgres -d vk
 ```bash
 docker compose ps
 docker compose logs --tail=200 bot
-docker compose exec redis redis-cli ping
-docker compose exec postgres pg_isready -U postgres
+docker compose exec bot python -m src.tools.sync_schedule --stats
+docker compose exec bot python -m src.tools.sync_schedule --list-targets
+# проверка доступа к ЭИОС (только там, где запускается синхронизация)
+docker compose exec bot python -m src.healthcheck
 ```
 
 ## 11. Если ЭИОС возвращает 451 (IP заблокирован)
@@ -192,20 +250,23 @@ docker compose exec postgres pg_isready -U postgres
 
 ```
 451 <html>...
-Не удалось прогреть кэш справочников
+Не удалось загрузить справочники
 ```
 
-Решения:
+Решения (важно: бот работает офлайн — проблема касается только синхронизации):
 
-1. Разместить бота на VPS **в РФ**.
-2. Настроить прокси с российским **резидентным** IP и указать его в `.env`:
+1. Запускать `python -m src.tools.sync_schedule ...` на машине **в РФ** и
+   переносить `data/bot.db` на сервер.
+2. Настроить прокси с российским **резидентным** IP и указать его в `.env`
+   (используется CLI-синхронизацией):
    ```
    EIOS_PROXY_URL=http://user:pass@203.0.113.10:8080
    ```
    Поддерживаются `http://`, `https://` и `socks5://` — пакет `httpx[socks]`
    уже включён в зависимости. Датацентровые IP тоже могут блокироваться,
    поэтому лучше резидентный/мобильный прокси.
-3. Поднять на сервере WireGuard/VPN с российским выходом (весь трафик через РФ).
+3. Поднять WireGuard/VPN с российским выходом на машине, где выполняется
+   синхронизация.
 
 Проверка после настройки:
 
@@ -223,15 +284,16 @@ docker compose exec bot python -m src.healthcheck
 - OK только `*/proxy` → нужен прокси (заголовки IP не меняют);
 - всё FAIL → блок по IP; заголовки не помогут, нужен резидентный прокси/другой IP.
 
-## 12. Если `PermissionError: '/app/.vkbottle'`
+## 12. Если `PermissionError: '/app/.vkbottle'` или не пишется `bot.db`
 
-Значит контейнер запущен на старом образе. Пересоберите без кэша:
+Пересоберите контейнер и проверьте права:
 
 ```bash
 docker compose build --no-cache bot
 docker compose up -d --force-recreate bot
-docker compose exec bot ls -ld /app /app/.vkbottle
-docker compose exec bot touch /app/.vkbottle/_check && echo "writable" && rm /app/.vkbottle/_check
+docker compose exec bot ls -ld /app /app/.vkbottle /app/data
+docker compose exec -u root bot chown -R 10001:10001 /app/data
+docker compose restart bot
 ```
 
 

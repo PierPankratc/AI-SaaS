@@ -1,17 +1,14 @@
 """Ограничение частоты запросов (защита от флуда и DoS).
 
-Два хранилища счётчиков:
-
-* :class:`InMemoryCounterStore` — скользящее окно в памяти одного процесса
-  (используется по умолчанию и в тестах);
-* :class:`RedisCounterStore` — общий счётчик фиксированного окна в Redis,
-  если бот запущен в нескольких инстансах.
+Счётчики хранятся в памяти процесса: бот работает офлайн и не зависит от
+внешних сервисов. Класс :class:`RateLimiter` не зависит от хранилища — при
+необходимости можно передать другую реализацию ``CounterStore``.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any, Protocol
+from typing import Protocol
 
 
 class CounterStore(Protocol):
@@ -34,19 +31,6 @@ class InMemoryCounterStore:
         hits.append(now)
         self._hits[key] = hits
         return len(hits)
-
-
-class RedisCounterStore:
-    """Фиксированное окно на Redis (общий счётчик для инстансов)."""
-
-    def __init__(self, client: Any) -> None:
-        self._client = client
-
-    async def incr(self, key: str, window: int) -> int:
-        count = int(await self._client.incr(key))
-        if count == 1:
-            await self._client.expire(key, window)
-        return count
 
 
 class RateLimiter:

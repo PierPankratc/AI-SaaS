@@ -1,15 +1,19 @@
-"""ORM-модели (SQLAlchemy 2.0) для PostgreSQL."""
+"""ORM-модели локальной базы данных (SQLite).
+
+В одном файле ``data/bot.db`` хранятся профили пользователей, черновики
+регистрации и расписание семестра. Внешние сервисы боту не нужны.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, func
+from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Базовый класс декларативных моделей."""
+    """Базовый класс декларативных моделей профилей и черновиков."""
 
 
 class User(Base):
@@ -35,11 +39,24 @@ class User(Base):
     teacher_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime, server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime,
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class Draft(Base):
+    """Черновик незавершённой регистрации (FSM) с временем обновления."""
+
+    __tablename__ = "drafts"
+
+    vk_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+

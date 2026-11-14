@@ -8,11 +8,12 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY data ./data
 RUN pip install --upgrade pip && pip install .
 
 # Запуск от непривилегированного пользователя
 RUN useradd --create-home --uid 10001 appuser \
-    && mkdir -p /app/.vkbottle \
+    && mkdir -p /app/.vkbottle /app/data \
     && chown -R appuser:appuser /app
 
 USER appuser

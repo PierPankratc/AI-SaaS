@@ -129,6 +129,21 @@ async def test_retry_then_success() -> None:
     assert calls["n"] == 3
 
 
+async def test_retry_on_429() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json={"data": {"years": ["2026-2027"]}, "state": 1})
+
+    async with create_client(handler) as client:
+        assert await client.get_years() == ["2026-2027"]
+
+    assert calls["n"] == 2
+
+
 async def test_persistent_server_error_raises() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)

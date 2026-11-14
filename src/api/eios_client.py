@@ -159,6 +159,28 @@ class EiosClient:
                         "(настройте прокси с российским IP — EIOS_PROXY_URL)",
                         status_code=451,
                     )
+                elif response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After", "")
+                    try:
+                        delay = max(0.0, float(retry_after))
+                    except ValueError:
+                        delay = self.backoff * (2 ** (attempt - 1))
+                    delay = max(delay, 1.0)
+                    last_error = EiosApiError(
+                        "ЭИОС ограничил частоту запросов (429)",
+                        status_code=429,
+                    )
+                    logger.warning(
+                        "ЭИОС ограничил частоту %s (попытка %d/%d), "
+                        "пауза %.1f с",
+                        path,
+                        attempt,
+                        self.retries,
+                        delay,
+                    )
+                    if attempt < self.retries:
+                        await asyncio.sleep(delay)
+                    continue
                 elif response.status_code >= 400:
                     raise EiosApiError(
                         f"ЭИОС вернул статус {response.status_code}",
@@ -216,7 +238,11 @@ class EiosClient:
         group_id: int,
         sdate: date | str | None = None,
     ) -> Schedule:
-        """Расписание группы; ``sdate`` — любой день нужной недели."""
+        """Расписание группы.
+
+        ``sdate`` — любой день нужной недели. Без ``sdate`` API отдаёт
+        расписание всего семестра (используется синхронизацией в SQLite).
+        """
         return await self._get_schedule({"idGroup": group_id}, sdate)
 
     async def get_teacher_schedule(
@@ -224,7 +250,11 @@ class EiosClient:
         teacher_id: int,
         sdate: date | str | None = None,
     ) -> Schedule:
-        """Расписание преподавателя; ``sdate`` — любой день нужной недели."""
+        """Расписание преподавателя.
+
+        ``sdate`` — любой день нужной недели. Без ``sdate`` API отдаёт
+        расписание всего семестра.
+        """
         return await self._get_schedule({"idTeacher": teacher_id}, sdate)
 
     async def _get_schedule(

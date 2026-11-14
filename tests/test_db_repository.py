@@ -1,17 +1,17 @@
-"""Тесты репозитория профилей (SQLite in-memory-файл, без PostgreSQL)."""
+"""Тесты репозитория профилей (единый SQLite-файл, без внешней БД)."""
+
 
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 
-from src.db.base import Database
+from src.db.sqlite_db import SqliteDatabase
 from src.db.repository import UserProfile, UserRepository
 
 
 @pytest_asyncio.fixture
 async def repo(tmp_path):
-    db_path = (tmp_path / "test.db").as_posix()
-    database = Database(f"sqlite+aiosqlite:///{db_path}")
+    database = SqliteDatabase(tmp_path / "test.db")
     await database.create_schema()
     try:
         yield UserRepository(database.session_factory)
@@ -84,3 +84,13 @@ def test_invalid_ids_rejected() -> None:
         UserProfile(vk_id=1, role="student", group_id=0)
     with pytest.raises(ValidationError):
         UserProfile(vk_id=1, role="student", course=9)
+
+
+async def test_list_all_returns_profiles(repo: UserRepository) -> None:
+    await repo.save(UserProfile(vk_id=2, role="student", group_id=1))
+    await repo.save(UserProfile(vk_id=1, role="teacher", teacher_id=2))
+
+    profiles = await repo.list_all()
+
+    assert [profile.vk_id for profile in profiles] == [1, 2]
+

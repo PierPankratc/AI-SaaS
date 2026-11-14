@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.db.models import User
@@ -52,6 +52,14 @@ class UserRepository:
             if user is None:
                 return None
             return self._to_profile(user)
+
+    async def list_all(self) -> list[UserProfile]:
+        """Все сохранённые профили (для синхронизации по зарегистрированным)."""
+        async with self._session_factory() as session:
+            users = (
+                await session.scalars(select(User).order_by(User.vk_id))
+            ).all()
+            return [self._to_profile(user) for user in users]
 
     async def save(self, profile: UserProfile) -> None:
         async with self._session_factory() as session:
