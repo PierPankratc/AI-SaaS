@@ -144,10 +144,29 @@ docker compose restart bot
 ## 5. Обновление версии
 
 ```bash
-git pull
-docker compose up -d --build
+cd ~/app
+git fetch origin main
+git reset --hard origin/main
+docker compose up -d --build --remove-orphans
 docker image prune -f
+docker compose logs -f --tail=100 bot
 ```
+
+`--build` обязателен: без пересборки контейнер продолжит работать со старым
+образом. `--remove-orphans` удаляет контейнеры сервисов, которых больше нет
+в `docker-compose.yml` (например, старый `postgres`).
+
+Проверить, какой код реально работает в контейнере:
+
+```bash
+docker compose exec bot ls /app/src/db
+# актуальная версия: models.py repository.py schedule_models.py
+# schedule_repository.py sqlite_db.py  (файла base.py быть не должно)
+docker compose exec bot python -m src.tools.sync_schedule --stats
+```
+
+Автодеплой: workflow `.github/workflows/deploy.yml` применяется при push в
+`main` (и вручную через «Run workflow»). Он выполняет те же команды на сервере.
 
 ## 6. Логирование
 
@@ -295,5 +314,43 @@ docker compose exec bot ls -ld /app /app/.vkbottle /app/data
 docker compose exec -u root bot chown -R 10001:10001 /app/data
 docker compose restart bot
 ```
+
+## 13. В логах `asyncpg` / `postgresql+asyncpg` / `Connect call failed ... 5432`
+
+Это **не ошибка кода из `main`**, а старый образ: контейнер запущен с версией
+до перехода на SQLite. Признаки в трейсбеке:
+
+```
+File "/app/src/db/base.py", line 30, in create_schema
+...
+File ".../sqlalchemy/dialects/postgresql/asyncpg.py", line 967, in connect
+OSError: Multiple exceptions: [Errno 111] Connect call failed ('127.0.0.1', 5432)
+```
+
+В актуальной версии файла `src/db/base.py` нет — база открывается через
+`src/db/sqlite_db.py` (`sqlite+aiosqlite`), PostgreSQL не нужен.
+
+Исправление на сервере:
+
+```bash
+cd ~/app
+git fetch origin main
+git reset --hard origin/main
+docker compose down --remove-orphans
+docker compose build --no-cache bot
+docker compose up -d --force-recreate
+docker compose logs -f --tail=100 bot
+# ожидаемо: «Локальная база: ...» и «Запуск бота ВК (long poll, офлайн-режим)…»
+```
+
+Автодеплой не срабатывал, пока workflow лежал в `.github/workflow/` (нужна
+папка `.github/workflows/`). Сейчас путь исправлен: проверьте, что на GitHub
+в разделе **Actions → Deploy** появляются запуски при push в `main`.
+
+Если профили пользователей остались в старой PostgreSQL, их можно один раз
+перенести в SQLite (см. раздел «Перенос профилей из старой PostgreSQL» в
+`README.md`). После переноса старый контейнер и его volume можно удалить:
+`docker compose down --remove-orphans` и `docker volume ls` / `docker volume rm`.
+
 
 

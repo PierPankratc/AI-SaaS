@@ -349,6 +349,10 @@ pytest -q        # 112 тестов: API, SQLite, миграция, синхро
   работать офлайн на уже сохранённых данных.
 - **`PermissionError: '/app/.vkbottle'`**: контейнер собран старым образом —
   `docker compose build --no-cache bot && docker compose up -d --force-recreate bot`.
+- **В трейсбеке `asyncpg` / `Connect call failed ... 5432`**: на сервере
+  запущен старый образ (до перехода на SQLite). Обновите код и пересоберите:
+  `git fetch origin main && git reset --hard origin/main && docker compose up -d --build --remove-orphans`.
+  В актуальной версии файла `src/db/base.py` нет, используется `src/db/sqlite_db.py`.
 - **Не хватает прав на `bot.db` после копирования**: выполните
   `docker compose exec -u root bot chown 10001:10001 /app/data/bot.db`.
 

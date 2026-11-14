@@ -26,6 +26,4 @@ Thumbs.db
 htmlcov/
 
 # Локальная база данных бота (SQLite) — создаётся автоматически/sync_schedule
-data/*.db-wal
-data/*.db-shm
 
