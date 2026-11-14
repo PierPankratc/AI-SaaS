@@ -376,5 +376,11 @@ pytest -q        # 112 тестов: API, SQLite, миграция, синхро
   `docker compose cp data/bot.db bot:/app/data/bot.db` и
   `docker compose exec -u root bot chown 10001:10001 /app/data/bot.db`
   (подробно — раздел 14 в `docs/DEPLOY.md`).
+- **Бот не видит базу на сервере («0 пар», «нет расписания»)**: восстановите
+  базу в volume одной командой из каталога `~/app`:
+  `bash scripts/restore_db.sh --from-git` (или `bash scripts/restore_db.sh ~/bot.db`).
+  Скрипт сам остановит контейнер, скопирует базу в `/app/data`, выставит
+  владельца `10001:10001` и проверит статистику. Вручную — раздел 15 в
+  `docs/DEPLOY.md`.
 
 

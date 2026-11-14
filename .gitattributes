@@ -4,3 +4,6 @@
 *.db binary
 *.db-wal binary
 *.db-shm binary
+
+# Shell-скрипты запускаются на Linux-сервере — только LF, без CRLF.
+*.sh text eol=lf

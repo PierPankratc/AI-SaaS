@@ -406,6 +406,58 @@ docker compose exec bot python -m src.tools.sync_schedule --stats
 > репозитории как двоичный файл (`.gitattributes`: `*.db binary`) и должна
 > совпадать с коммитом байт-в-байт.
 
+## 15. Бот не видит базу на сервере — восстановление
+
+Признаки: в логах «В локальной базе нет расписания», `--stats` показывает
+`0` пар, хотя файл `~/app/data/bot.db` существует. Причина — бот читает
+volume `bot_data` (`/app/data`), а не файл из git (раздел 14).
+
+### Быстрый способ (скрипт из репозитория)
+
+```bash
+cd ~/app
+git fetch origin main
+git reset --hard origin/main
+bash scripts/restore_db.sh --from-git          # эталонная база из origin/main
+# или свой файл:  bash scripts/restore_db.sh ~/bot.db
+```
+
+Что делает скрипт: проверяет, что файл — SQLite-база; останавливает `bot`;
+копирует базу в volume через тот же образ (от root); удаляет устаревшие
+`bot.db-wal`/`bot.db-shm`; выставляет владельца `10001:10001`; поднимает
+контейнер и печатает статистику базы.
+
+### Вручную (если скрипт недоступен)
+
+```bash
+cd ~/app
+docker compose stop bot
+docker compose run --rm --no-deps --user root \
+  -v "$PWD/data/bot.db:/restore/bot.db:ro" \
+  --entrypoint sh bot -c '
+    set -e
+    rm -f /app/data/bot.db-wal /app/data/bot.db-shm
+    cp /restore/bot.db /app/data/bot.db
+    chown -R 10001:10001 /app/data
+    chmod 755 /app/data
+    chmod 644 /app/data/bot.db
+  '
+docker compose up -d bot
+docker compose exec -T bot python -m src.tools.sync_schedule --stats
+```
+
+Ожидаемо: `lessons > 0` (для эталонной базы — `115705`) и в логах
+«Локальная база: 115705 пар, 845 целей, 380 групп, 462 преподавателей».
+
+Если появилась ошибка `sqlite3.OperationalError: unable to open database file`,
+проверьте права на каталог тома:
+
+```bash
+docker compose exec bot ls -ld /app/data
+docker compose exec -u root bot chown -R 10001:10001 /app/data
+docker compose restart bot
+```
+
 
 
 
