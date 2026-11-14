@@ -26,4 +26,11 @@ Thumbs.db
 htmlcov/
 
 # Локальная база данных бота (SQLite) — создаётся автоматически/sync_schedule
+# Сам data/bot.db отслеживается git (эталонная база с расписанием),
+# а транзиентные файлы WAL рядом с ней и локальные копии коммитить нельзя.
+data/*.db-wal
+data/*.db-shm
+data/*.local.db
+data/*.local.db-wal
+data/*.local.db-shm
 

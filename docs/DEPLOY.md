@@ -401,6 +401,11 @@ docker compose exec bot python -m src.tools.sync_schedule --stats
 в контейнере `/app/data` — это volume. Он нужен только как исходник для
 `docker compose cp`.
 
+> `bot.db-wal` и `bot.db-shm` — служебные файлы SQLite, в git их коммитить
+> нельзя (исключены в `.gitignore`). Эталонная `data/bot.db` хранится в
+> репозитории как двоичный файл (`.gitattributes`: `*.db binary`) и должна
+> совпадать с коммитом байт-в-байт.
+
 
 
 

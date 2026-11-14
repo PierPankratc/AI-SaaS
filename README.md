@@ -125,6 +125,19 @@ python -m src.main
 Бот создаст/откроет `data/bot.db` (таблицы `users`, `drafts`, `lessons` и др.),
 будет читать расписание только из него и общаться с VK через Long Poll.
 
+> `data/bot.db` отслеживается git как эталонная база с расписанием. При запуске
+> бота SQLite переключает файл в WAL-режим (меняются служебные байты заголовка)
+> и создаёт рядом `bot.db-wal`/`bot.db-shm`, поэтому `git status` покажет базу
+> изменённой. Чтобы эталон остался байт-в-байт, работайте на копии:
+>
+> ```bash
+> cp data/bot.db data/bot.local.db      # Windows: copy data\bot.db data\bot.local.db
+> # в .env: SQLITE_DB_PATH=data/bot.local.db
+> ```
+>
+> Вернуть эталон после случайного запуска: `git checkout -- data/bot.db`
+> и удалить `data/bot.db-wal`, `data/bot.db-shm`.
+
 ### Docker
 
 ```bash
