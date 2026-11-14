@@ -355,5 +355,13 @@ pytest -q        # 112 тестов: API, SQLite, миграция, синхро
   В актуальной версии файла `src/db/base.py` нет, используется `src/db/sqlite_db.py`.
 - **Не хватает прав на `bot.db` после копирования**: выполните
   `docker compose exec -u root bot chown 10001:10001 /app/data/bot.db`.
+- **Кажется, что «пропал» `data/bot.db` после деплоя**: база лежит не в
+  `~/app/data`, а в Docker-volume `bot_data` (смонтирован в `/app/data`).
+  `.dockerignore` намеренно не кладёт `data/*.db` в образ, а volume при первом
+  запуске SQLite-версии создаётся пустым. Проверка:
+  `docker compose exec bot ls -lh /app/data`; загрузка базы:
+  `docker compose cp data/bot.db bot:/app/data/bot.db` и
+  `docker compose exec -u root bot chown 10001:10001 /app/data/bot.db`
+  (подробно — раздел 14 в `docs/DEPLOY.md`).
 
 

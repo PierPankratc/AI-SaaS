@@ -352,5 +352,55 @@ docker compose logs -f --tail=100 bot
 `README.md`). После переноса старый контейнер и его volume можно удалить:
 `docker compose down --remove-orphans` и `docker volume ls` / `docker volume rm`.
 
+## 14. «Пропал» `data/bot.db` после деплоя
+
+Файл никуда не удаляется — он лежит **не в папке `~/app/data`**, а в
+именованном Docker-volume `bot_data`, который смонтирован в `/app/data`
+контейнера (см. `docker-compose.yml`). Причины, по которым кажется, что базы нет:
+
+1. `.dockerignore` исключает `data/*.db` — файл **намеренно не попадает в
+   образ** (в нём персональные данные: VK ID и группа пользователя).
+2. Volume перекрывает содержимое `/app/data` из образа. Старая версия бота
+   работала на PostgreSQL, поэтому при переходе на SQLite был создан **новый
+   пустой** volume `bot_data`: бот сам создал в нём пустой `bot.db` с таблицами,
+   но без расписания и профилей. Отсюда предупреждение в логах
+   «В локальной базе нет расписания».
+
+Проверить, что реально лежит в контейнере и в volume:
+
+```bash
+cd ~/app
+docker compose exec bot ls -lh /app/data          # файл бота (volume bot_data)
+docker volume ls                                  # имя тома: app_bot_data
+docker compose exec bot python -m src.tools.sync_schedule --stats
+```
+
+Загрузить заранее собранную базу в volume (файл `data/bot.db` берётся с машины,
+где запускалась `sync_schedule`):
+
+```bash
+# 1) остановить бота (чтобы не было WAL-файлов)
+docker compose stop bot
+
+# 2) скопировать базу с локальной машины на сервер (scp выполняется локально)
+scp data/bot.db deploy@SERVER:~/app/bot.db
+
+# 3) на сервере: положить файл в volume и выдать права пользователю бота
+cd ~/app
+docker compose cp bot.db bot:/app/data/bot.db
+docker compose exec -u root bot chown 10001:10001 /app/data/bot.db
+docker compose start bot
+docker compose exec bot python -m src.tools.sync_schedule --stats
+```
+
+> Если бота остановить нельзя, копию снимайте через SQLite backup API
+> (раздел 8), а не обычным `cp` — при включённом WAL рядом лежат
+> `bot.db-wal` и `bot.db-shm`.
+
+Тот же файл `data/bot.db`, который есть в git-репозитории, бот **не читает**:
+в контейнере `/app/data` — это volume. Он нужен только как исходник для
+`docker compose cp`.
+
+
 
 
