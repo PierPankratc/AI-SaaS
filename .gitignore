@@ -33,4 +33,5 @@ data/*.db-shm
 data/*.local.db
 data/*.local.db-wal
 data/*.local.db-shm
+data/*.alive
 

@@ -11,7 +11,7 @@ from src.config import get_settings
 from src.db.repository import UserRepository
 from src.db.schedule_repository import ScheduleRepository
 from src.db.sqlite_db import SqliteDatabase
-from src.monitoring import heartbeat_loop, setup_sentry
+from src.monitoring import alive_loop, heartbeat_loop, setup_sentry
 from src.services.catalog_service import CatalogService
 from src.services.rate_limiter import InMemoryCounterStore, RateLimiter
 from src.services.schedule_service import ScheduleService
@@ -70,12 +70,23 @@ async def run() -> None:
         )
 
     heartbeat_task: asyncio.Task | None = None
+    alive_task: asyncio.Task | None = None
     try:
         if settings.heartbeat_url:
             heartbeat_task = asyncio.create_task(
                 heartbeat_loop(
                     settings.heartbeat_url, settings.heartbeat_interval
                 )
+            )
+
+        if settings.alive_file_path:
+            logger.info(
+                "Файл-пульс для healthcheck: %s (каждые %s с)",
+                settings.alive_file_path,
+                settings.alive_interval,
+            )
+            alive_task = asyncio.create_task(
+                alive_loop(settings.alive_file_path, settings.alive_interval)
             )
 
         core = BotCore(
@@ -86,10 +97,11 @@ async def run() -> None:
         logger.info("Запуск бота ВК (long poll, офлайн-режим)…")
         await bot.run_polling()
     finally:
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
+        for task in (heartbeat_task, alive_task):
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
         await database.dispose()
 
 

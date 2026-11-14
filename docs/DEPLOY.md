@@ -458,6 +458,119 @@ docker compose exec -u root bot chown -R 10001:10001 /app/data
 docker compose restart bot
 ```
 
+## 16. Отказоустойчивость: работа без SSH и самовосстановление
+
+### 16.1. SSH можно закрывать
+
+Бот живёт в контейнере, а не в SSH-сессии:
+
+- запускайте только в фоне: `docker compose up -d` (без `-d` compose
+  останавливает контейнеры при обрыве соединения);
+- долгие команды (синхронизация семестра) — в отсоединённом режиме:
+  ```bash
+  docker compose exec -d bot python -m src.tools.sync_schedule --all-groups
+  docker compose logs -f --tail=50 bot     # прогресс; можно прервать
+  ```
+  либо `tmux new -s sync` и обычный запуск внутри;
+- `docker compose logs -f` можно закрывать в любой момент — на бота это
+  не влияет.
+
+### 16.2. Автозапуск после перезагрузки сервера
+
+```bash
+sudo systemctl enable --now docker     # Docker стартует при загрузке
+```
+
+В `docker-compose.yml` стоит `restart: unless-stopped`: контейнер поднимается
+после падения процесса и после перезагрузки сервера. Проверка:
+
+```bash
+docker compose ps      # STATUS: Up ... (healthy)
+```
+
+Если контейнер был остановлен вручную (`docker compose stop`), политика
+`unless-stopped` его не поднимет — нужен `docker compose up -d`.
+
+### 16.3. Healthcheck: жив ли бот и не завис ли
+
+Compose задаёт `ALIVE_FILE_PATH=/app/data/bot.alive`; бот обновляет этот файл
+каждые `ALIVE_INTERVAL` (30 с) из event loop. Healthcheck проверяет, что файл
+обновлялся не позже 120 секунд назад, — это ловит не только падение процесса,
+но и зависание long poll.
+
+```bash
+docker compose ps
+docker compose exec bot ls -l /app/data/bot.alive
+docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q bot)"
+```
+
+### 16.4. Сторож: перезапуск при `unhealthy`
+
+Docker сам не перезапускает контейнер по статусу `unhealthy`, поэтому в
+репозитории есть `scripts/watchdog.sh`: если контейнер не `running` или
+`unhealthy` — поднимает/перезапускает его. Запускайте по таймеру systemd
+(SSH не нужен).
+
+`/etc/systemd/system/vk-bot-watchdog.service`:
+
+```ini
+[Unit]
+Description=Watchdog for VK schedule bot
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/home/deploy/app
+Environment=APP_DIR=/home/deploy/app
+ExecStart=/home/deploy/app/scripts/watchdog.sh
+```
+
+`/etc/systemd/system/vk-bot-watchdog.timer`:
+
+```ini
+[Unit]
+Description=Run VK bot watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=vk-bot-watchdog.service
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now vk-bot-watchdog.timer
+systemctl list-timers vk-bot-watchdog.timer
+journalctl -u vk-bot-watchdog.service -n 20 --no-pager
+```
+
+Альтернатива — cron (пользователь `deploy` уже в группе `docker`):
+
+```cron
+* * * * * cd /home/deploy/app && ./scripts/watchdog.sh >> /var/log/vk-bot-watchdog.log 2>&1
+```
+
+### 16.5. Что защищает от чего
+
+| Риск | Защита |
+|---|---|
+| исключение / падение процесса | `restart: unless-stopped` |
+| зависание event loop | healthcheck по файлу-«пульсу» + watchdog |
+| перезагрузка сервера | `systemctl enable docker` + restart policy |
+| обрыв SSH | `docker compose up -d`, `exec -d`, tmux |
+| переполнение диска логами | ротация `json-file` 10 МБ × 3 |
+| «тихое» падение | `HEARTBEAT_URL` + Sentry |
+| обновление кода | `docker compose up -d --build` (deploy workflow) |
+| потеря базы | бэкапы `data/bot.db` (раздел 8) |
+
+> `docker compose down` останавливает бота, а `down -v` ещё и удаляет volume
+> с базой — не используйте `-v` в рабочем контуре.
+
 
 
 

@@ -2,13 +2,35 @@ services:
   bot:
     build: .
     restart: unless-stopped
+    # tini как PID 1: корректная обработка SIGTERM и уборка зомби-процессов.
+    init: true
+    stop_grace_period: 20s
     env_file:
       - .env
     environment:
       # Единый файл SQLite с профилями, черновиками и расписанием.
       SQLITE_DB_PATH: /app/data/bot.db
+      # Файл-«пульс»: бот обновляет его, healthcheck проверяет свежесть.
+      ALIVE_FILE_PATH: /app/data/bot.alive
+      ALIVE_INTERVAL: "30"
     volumes:
       - bot_data:/app/data
+    # Контейнер считается здоровым, только если бот жив и его event loop
+    # не завис (файл-пульс обновлялся не позже 120 секунд назад).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, sys, time
+          path = "/app/data/bot.alive"
+          fresh = os.path.exists(path) and time.time() - os.path.getmtime(path) < 120
+          sys.exit(0 if fresh else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     logging:
       driver: json-file
       options:

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     heartbeat_url: str = ""  # URL пинга (healthchecks.io и т.п.)
     heartbeat_interval: int = 300  # период пинга в секундах
 
+    # --- Отказоустойчивость (Docker healthcheck + watchdog) ---
+    alive_file_path: str = ""  # файл-«пульс»; пусто — не писать
+    alive_interval: int = 30  # период обновления файла-пульса, сек
+
 
 @lru_cache
 def get_settings() -> Settings:

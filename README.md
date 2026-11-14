@@ -326,6 +326,28 @@ pytest -q        # 112 тестов: API, SQLite, миграция, синхро
 
 Подробная инструкция — в [docs/DEPLOY.md](docs/DEPLOY.md).
 
+## Отказоустойчивость (работа без SSH)
+
+Бот работает в контейнере, поэтому закрывать SSH-сессию безопасно — если
+запускать его в фоне:
+
+```bash
+docker compose up -d            # -d обязателен: без него compose остановит бота при обрыве SSH
+docker compose exec -d bot python -m src.tools.sync_schedule --all-groups   # долгие задачи — detached
+```
+
+Что уже настроено:
+
+- `restart: unless-stopped` — контейнер поднимается после падения и после
+  перезагрузки сервера (нужен `sudo systemctl enable docker`);
+- `healthcheck` по файлу-«пульсу» `/app/data/bot.alive` (бот обновляет его
+  каждые 30 с) — ловит зависание event loop, `docker compose ps` показывает
+  `healthy`/`unhealthy`;
+- `scripts/watchdog.sh` + systemd timer — перезапускает контейнер, если он
+  упал или стал `unhealthy` (настройка в разделе 16 `docs/DEPLOY.md`);
+- `init: true` и `stop_grace_period: 20s` — корректное завершение по SIGTERM;
+- ротация логов и Sentry/heartbeat — чтобы узнать о сбое без SSH.
+
 ## Деплой на VPS (кратко)
 
 1. Ubuntu 22.04+, пользователь без root, вход по SSH-ключам, `ufw` (22/80/443).
