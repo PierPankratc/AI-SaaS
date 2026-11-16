@@ -189,6 +189,8 @@ async def test_day_and_week_text(repository) -> None:
     await store_week(repository)
     service = ScheduleService(repository)
 
+    assert (service.next_week() - service.today()).days == 7
+
     day_text = await service.day_text(
         Role.STUDENT, 8948, date(2026, 11, 10), title="Группа 26-ПМбо-1"
     )

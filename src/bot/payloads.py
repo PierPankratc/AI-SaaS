@@ -31,6 +31,7 @@ class Action(str, Enum):
     TODAY = "today"
     TOMORROW = "tomorrow"
     WEEK = "week"
+    NEXT_WEEK = "next_week"
     CHANGE = "change"
     MENU = "menu"
 

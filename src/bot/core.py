@@ -136,6 +136,8 @@ class BotCore:
             return await self._on_schedule(vk_id, profile, "tomorrow")
         if action is Action.WEEK:
             return await self._on_schedule(vk_id, profile, "week")
+        if action is Action.NEXT_WEEK:
+            return await self._on_schedule(vk_id, profile, "next_week")
         if action is Action.CHANGE:
             return await self._on_change(vk_id)
         if action is Action.MENU:
@@ -391,6 +393,10 @@ class BotCore:
         elif kind == "tomorrow":
             text = await self._schedules.day_text(
                 role, target, self._schedules.tomorrow(), title
+            )
+        elif kind == "next_week":
+            text = await self._schedules.week_text(
+                role, target, self._schedules.next_week(), title
             )
         else:
             text = await self._schedules.week_text(

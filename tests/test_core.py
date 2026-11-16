@@ -56,11 +56,14 @@ class FakeSchedules:
     def tomorrow(self) -> date:
         return date(2026, 11, 12)
 
+    def next_week(self) -> date:
+        return date(2026, 11, 18)
+
     async def day_text(self, role, target, day, title=None):
         return f"DAY {role.value} {target} {day.isoformat()} | {title}"
 
     async def week_text(self, role, target, day, title=None):
-        return f"WEEK {role.value} {target} | {title}"
+        return f"WEEK {role.value} {target} {day.isoformat()} | {title}"
 
 
 class FakeRepository:
@@ -123,6 +126,7 @@ async def test_student_flow_saves_profile() -> None:
         Action.TODAY,
         Action.TOMORROW,
         Action.WEEK,
+        Action.NEXT_WEEK,
         Action.CHANGE,
     }
 
@@ -160,7 +164,10 @@ async def test_schedule_buttons_use_profile() -> None:
     assert Action.TODAY in kb_actions(today)
 
     week = await core.handle(5, None, make_payload(Action.WEEK))
-    assert week.text.startswith("WEEK student 8948")
+    assert week.text.startswith("WEEK student 8948 2026-11-11")
+
+    next_week = await core.handle(5, None, make_payload(Action.NEXT_WEEK))
+    assert next_week.text.startswith("WEEK student 8948 2026-11-18")
 
 
 async def test_change_profile_resets() -> None:

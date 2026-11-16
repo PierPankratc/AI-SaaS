@@ -194,6 +194,13 @@ def main_menu_keyboard() -> KeyboardSpec:
             (ButtonSpec("🗓 На эту неделю", make_payload(Action.WEEK), "primary"),),
             (
                 ButtonSpec(
+                    "⏭ На следующую неделю",
+                    make_payload(Action.NEXT_WEEK),
+                    "primary",
+                ),
+            ),
+            (
+                ButtonSpec(
                     "🔄 Сменить группу / профиль",
                     make_payload(Action.CHANGE),
                     "secondary",

@@ -84,4 +84,10 @@ def test_levels_courses_menu() -> None:
 
     menu = main_menu_keyboard()
     actions = {_action(button) for button in menu.buttons()}
-    assert actions == {Action.TODAY, Action.TOMORROW, Action.WEEK, Action.CHANGE}
+    assert actions == {
+        Action.TODAY,
+        Action.TOMORROW,
+        Action.WEEK,
+        Action.NEXT_WEEK,
+        Action.CHANGE,
+    }

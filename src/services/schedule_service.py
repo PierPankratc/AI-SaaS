@@ -3,7 +3,8 @@
 Бот не обращается к ЭИОС: расписание семестра заранее скачивается
 CLI-утилитой ``python -m src.tools.sync_schedule`` в локальную базу
 (``data/bot.db``). Текстовые «экраны» рассчитаны на навигацию кнопками
-(«На сегодня», «На завтра», «На эту неделю», «Сменить профиль»).
+(«На сегодня», «На завтра», «На эту неделю», «На следующую неделю»,
+«Сменить профиль»).
 """
 
 from __future__ import annotations
@@ -127,7 +128,7 @@ def format_week(schedule: Schedule, role: Role, title: str | None = None) -> str
     """Текст расписания на всю неделю, сгруппированный по дням."""
     header = title or "Расписание на неделю"
     if not schedule.lessons:
-        return f"{header}\n\n😴 На этой неделе занятий нет"
+        return f"{header}\n\n😴 Занятий нет"
 
     by_day: dict[date, list[Lesson]] = {}
     for lesson in schedule.lessons:
@@ -195,6 +196,10 @@ class ScheduleService:
 
     def tomorrow(self) -> date:
         return self.today() + timedelta(days=1)
+
+    def next_week(self) -> date:
+        """Дата на следующей неделе (через 7 дней от сегодня)."""
+        return self.today() + timedelta(days=7)
 
     async def get_week(self, role: Role, target_id: int, day: date) -> Schedule:
         """Расписание на неделю, содержащую ``day`` (только из SQLite)."""
