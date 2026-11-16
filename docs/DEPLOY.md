@@ -90,11 +90,31 @@ HEARTBEAT_URL=<ping url healthchecks.io или пусто>
 
 ## 4. Запуск
 
+Образ бота собирается в GitHub Actions и публикуется в GHCR, поэтому на сервере
+его не нужно собирать:
+
+```bash
+cd ~/app
+docker compose pull
+docker compose up -d --no-build
+```
+
+Если пакет GHCR приватный и сервер ещё не залогинен, один раз выполните вход
+токеном с правом `read:packages` (см. раздел 5.1):
+
+```bash
+echo "<TOKEN>" | docker login ghcr.io -u <github-username> --password-stdin
+```
+
+`docker compose up -d --build` остаётся вариантом для локальной сборки
+(например, если пакет GHCR недоступен).
+
 Сначала подготовьте базу с расписанием. Вариант A — сервер имеет доступ к ЭИОС
 (напрямую или через `EIOS_PROXY_URL`):
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d --no-build
 docker compose exec bot python -m src.tools.sync_schedule --all-groups
 docker compose exec bot python -m src.tools.sync_schedule --skip-catalog --teachers-from-groups
 docker compose logs -f bot
@@ -111,7 +131,8 @@ scp data/bot.db deploy@SERVER:~/app/data/bot.db
 
 # на сервере
 cd ~/app
-docker compose up -d --build
+docker compose pull
+docker compose up -d --no-build
 docker compose cp data/bot.db bot:/app/data/bot.db
 docker compose exec -u root bot chown 10001:10001 /app/data/bot.db
 docker compose restart bot
@@ -147,14 +168,20 @@ docker compose restart bot
 cd ~/app
 git fetch origin main
 git reset --hard origin/main
-docker compose up -d --build --remove-orphans
+docker compose pull
+docker compose up -d --remove-orphans --no-build
 docker image prune -f
 docker compose logs -f --tail=100 bot
 ```
 
-`--build` обязателен: без пересборки контейнер продолжит работать со старым
-образом. `--remove-orphans` удаляет контейнеры сервисов, которых больше нет
-в `docker-compose.yml` (например, старый `postgres`).
+`--no-build` обязателен в рабочем контуре: сборка выполняется только в GitHub
+Actions, сервер лишь скачивает готовый образ из GHCR. `--remove-orphans`
+удаляет контейнеры сервисов, которых больше нет в `docker-compose.yml`
+(например, старый `postgres`).
+
+Образ по умолчанию — `ghcr.io/pierpankratc/ai-saas:latest`. Переопределить его
+можно переменной `BOT_IMAGE` в `.env` (например, откатиться на конкретный
+коммит: `BOT_IMAGE=ghcr.io/pierpankratc/ai-saas:sha-<sha>`).
 
 Проверить, какой код реально работает в контейнере:
 
@@ -165,19 +192,26 @@ docker compose exec bot ls /app/src/db
 docker compose exec bot python -m src.tools.sync_schedule --stats
 ```
 
-### 5.1 Автодеплой из GitHub Actions (CI → Deploy)
+### 5.1 Автодеплой из GitHub Actions (CI → GHCR → сервер)
 
 Workflow `.github/workflows/deploy.yml` запускается при push в `main`
-(и вручную: **Actions → CI / Deploy → Run workflow**). Pipeline состоит из двух
+(и вручную: **Actions → CI / Deploy → Run workflow**). Pipeline состоит из трёх
 job:
 
 1. **ci** — `ruff check src tests`, `python -m compileall -q src tests`,
-   `pytest -q` и `docker build` (проверка, что образ собирается). Запускается
-   также на каждый pull request.
-2. **deploy** — выполняется только если `ci` прошёл успешно и только для push
-   в `main` (или ручного запуска): по SSH заходит на сервер, делает
-   `git reset --hard origin/main`, пересобирает и перезапускает контейнер и
-   ждёт статус `healthy` (иначе деплой считается проваленным).
+   `pytest -q`. Запускается также на каждый pull request.
+2. **build** — собирает образ на раннере GitHub и пушит его в GHCR:
+   `ghcr.io/<owner>/<repo>:latest` и тег `:sha-<sha>` коммита (удобно для
+   отката). На pull request образ собирается для проверки Dockerfile, но не
+   пушится. Сборка кэшируется (`cache-from/to: type=gha`).
+3. **deploy** — выполняется только если `ci` и `build` прошли успешно и только
+   для push в `main` (или ручного запуска): по SSH заходит на сервер, делает
+   `git reset --hard origin/main`, логинится в GHCR токеном запуска, выполняет
+   `docker compose pull` и `docker compose up -d --no-build`, затем ждёт статус
+   `healthy` (иначе деплой считается проваленным).
+
+**Образ на сервере не собирается** — только скачивается. Это быстро и не
+нагружает VPS.
 
 Обязательные секреты репозитория (**Settings → Secrets and variables →
 Actions**):
@@ -188,6 +222,15 @@ Actions**):
 | `SERVER_USER` | пользователь SSH, у которого лежит `~/app` и есть доступ к `docker` |
 | `SERVER_SSH_KEY` | приватный SSH-ключ (публичный — в `~/.ssh/authorized_keys` этого пользователя) |
 | `SERVER_PORT` | (необязательно) порт SSH, по умолчанию 22 |
+
+Дополнительные секреты для GHCR не нужны: используется `GITHUB_TOKEN` с
+правами `packages: write` (задан в workflow). При первом успешном деплое в
+аккаунте появится пакет `ai-saas` (приватный по умолчанию).
+
+Если сервер должен тянуть образ без логина, сделайте пакет публичным:
+**профиль GitHub → Packages → ai-saas → Package settings → Change visibility**.
+Либо один раз залогиньтесь на сервере PAT-токеном с правом `read:packages`:
+`echo "<TOKEN>" | docker login ghcr.io -u <github-username> --password-stdin`.
 
 Требования к серверу: `~/app` — git-клон репозитория с настроенным deploy key;
 пользователь из `SERVER_USER` состоит в группе `docker`; файл `.env` создан
@@ -333,8 +376,8 @@ docker compose exec bot python -m src.healthcheck
 Пересоберите контейнер и проверьте права:
 
 ```bash
-docker compose build --no-cache bot
-docker compose up -d --force-recreate bot
+docker compose pull
+docker compose up -d --force-recreate --no-build bot
 docker compose exec bot ls -ld /app /app/.vkbottle /app/data
 docker compose exec -u root bot chown -R 10001:10001 /app/data
 docker compose restart bot
@@ -362,8 +405,8 @@ cd ~/app
 git fetch origin main
 git reset --hard origin/main
 docker compose down --remove-orphans
-docker compose build --no-cache bot
-docker compose up -d --force-recreate
+docker compose pull
+docker compose up -d --force-recreate --no-build
 docker compose logs -f --tail=100 bot
 # ожидаемо: «Локальная база: ...» и «Запуск бота ВК (long poll, офлайн-режим)…»
 ```
@@ -590,7 +633,7 @@ journalctl -u vk-bot-watchdog.service -n 20 --no-pager
 | обрыв SSH | `docker compose up -d`, `exec -d`, tmux |
 | переполнение диска логами | ротация `json-file` 10 МБ × 3 |
 | «тихое» падение | `HEARTBEAT_URL` + Sentry |
-| обновление кода | `docker compose up -d --build` (deploy workflow) |
+| обновление кода | CI собирает образ в GHCR, сервер делает `docker compose pull` |
 | потеря базы | бэкапы `data/bot.db` (раздел 8) |
 
 > `docker compose down` останавливает бота, а `down -v` ещё и удаляет volume

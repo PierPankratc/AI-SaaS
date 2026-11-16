@@ -11,8 +11,16 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# packages: write нужен для push образа в GitHub Container Registry.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
 jobs:
-  # Проверки качества: без их успеха деплой не запускается.
+  # Проверки качества: без их успеха образ не собирается и деплой не начинается.
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -40,36 +48,81 @@ jobs:
       - name: Tests (pytest)
         run: pytest -q
 
-      # Образ собирается здесь же: если Dockerfile сломан, деплой не начнётся.
-      - name: Build Docker image
-        run: docker build -t vk-eios-schedule-bot:ci .
-
-  # Деплой только после успешного CI и только для main (или ручного запуска).
-  deploy:
+  # Образ собирается только здесь (на раннере GitHub) и пушится в GHCR.
+  # Pull request собирает образ для проверки Dockerfile, но ничего не пушит.
+  build:
     needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action приводит имя репозитория к нижнему регистру:
+      # ghcr.io/<owner>/<repo>:latest и :<sha> (удобно для отката).
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Деплой: на сервер попадает только compose-файл (git reset), а сам образ
+  # скачивается из GHCR — сборки на сервере нет.
+  deploy:
+    needs: build
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Deploy over SSH
+      - name: Pull image and restart over SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
+          envs: GHCR_USER,GHCR_TOKEN
           script_stop: true
           command_timeout: 15m
           script: |
             set -e
             cd ~/app
-            # Сервер — только копия main: локальные правки не должны
-            # оставлять контейнер на старом коде.
+            # Compose-файл и .env берутся из main; сам код — из образа GHCR.
             git fetch origin main
             git reset --hard origin/main
-            # --build обязателен: иначе контейнер продолжит работать
-            # со старым образом (например, с кодом времён PostgreSQL).
-            docker compose up -d --build --remove-orphans
+
+            # Пакет GHCR приватный: логинимся токеном текущего запуска.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            docker compose pull
+            # --no-build: сборка на сервере запрещена, образ только из GHCR.
+            docker compose up -d --remove-orphans --no-build
 
             # Ждём healthy: контейнер, упавший сразу после старта,
             # должен валить деплой, а не оставаться незамеченным.

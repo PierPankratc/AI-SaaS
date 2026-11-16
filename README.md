@@ -143,9 +143,13 @@ python -m src.main
 ```bash
 cp .env.example .env                 # Windows: copy .env.example .env
 # укажите VK_BOT_TOKEN
-docker compose up -d --build
+docker compose pull                  # готовый образ из GHCR (собирается в CI)
+docker compose up -d --no-build
 docker compose logs -f bot
 ```
+
+> Образ публикуется в GHCR автоматически из GitHub Actions. Для локальной
+> сборки без GHCR: `docker compose up -d --build`.
 
 Если сервер **не имеет доступа к ЭИОС**:
 
@@ -360,9 +364,12 @@ docker compose exec -d bot python -m src.tools.sync_schedule --all-groups   # д
    - либо на сервере, если ЭИОС доступен (или настроен `EIOS_PROXY_URL`):
      `docker compose exec bot python -m src.tools.sync_schedule --all-groups`, затем
      `docker compose exec bot python -m src.tools.sync_schedule --skip-catalog --teachers-from-groups`.
-5. `docker compose up -d --build`, проверить `docker compose ps` и логи.
-6. Обновление: push в `main` — GitHub Actions (CI → Deploy) сам прогонит тесты,
-   соберёт образ и обновит сервер; вручную: `git pull && docker compose up -d --build`.
+5. `docker compose pull && docker compose up -d --no-build`, проверить
+   `docker compose ps` и логи.
+6. Обновление: push в `main` — GitHub Actions (CI → Build → Deploy) прогонит
+   тесты, соберёт образ и запушит его в GHCR, а сервер скачает его командами
+   `docker compose pull && docker compose up -d --no-build`. Вручную — те же две
+   команды после `git pull`.
 7. Бэкап: копия `data/bot.db` (или тома `bot_data`) — в ней и профили, и
    расписание.
 
@@ -384,10 +391,10 @@ docker compose exec -d bot python -m src.tools.sync_schedule --all-groups   # д
   машине с российским IP или задайте `EIOS_PROXY_URL`. Бот при этом продолжает
   работать офлайн на уже сохранённых данных.
 - **`PermissionError: '/app/.vkbottle'`**: контейнер собран старым образом —
-  `docker compose build --no-cache bot && docker compose up -d --force-recreate bot`.
+  `docker compose pull && docker compose up -d --force-recreate --no-build bot`.
 - **В трейсбеке `asyncpg` / `Connect call failed ... 5432`**: на сервере
-  запущен старый образ (до перехода на SQLite). Обновите код и пересоберите:
-  `git fetch origin main && git reset --hard origin/main && docker compose up -d --build --remove-orphans`.
+  запущен старый образ (до перехода на SQLite). Обновите образ из GHCR:
+  `git fetch origin main && git reset --hard origin/main && docker compose pull && docker compose up -d --force-recreate --no-build --remove-orphans`.
   В актуальной версии файла `src/db/base.py` нет, используется `src/db/sqlite_db.py`.
 - **Не хватает прав на `bot.db` после копирования**: выполните
   `docker compose exec -u root bot chown 10001:10001 /app/data/bot.db`.

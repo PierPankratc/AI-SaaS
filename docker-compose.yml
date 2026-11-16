@@ -1,5 +1,9 @@
 services:
   bot:
+    # Образ собирается в GitHub Actions и публикуется в GHCR, сервер его только
+    # скачивает (`docker compose pull` + `up -d --no-build`). `build` оставлен
+    # для локальной разработки; переопределить образ: BOT_IMAGE=... в .env.
+    image: ${BOT_IMAGE:-ghcr.io/pierpankratc/ai-saas:latest}
     build: .
     restart: unless-stopped
     # tini как PID 1: корректная обработка SIGTERM и уборка зомби-процессов.
