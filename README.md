@@ -310,7 +310,7 @@ python -m src.tools.migrate_from_postgres \
 ## Тесты
 
 ```bash
-pytest -q        # 112 тестов: API, SQLite, миграция, синхронизация, каталог, расписание, UI, ядро
+pytest -q        # 116 тестов: API, SQLite, миграция, синхронизация, каталог, расписание, UI, ядро
 ```
 
 ## Мониторинг и логирование ошибок
@@ -361,7 +361,8 @@ docker compose exec -d bot python -m src.tools.sync_schedule --all-groups   # д
      `docker compose exec bot python -m src.tools.sync_schedule --all-groups`, затем
      `docker compose exec bot python -m src.tools.sync_schedule --skip-catalog --teachers-from-groups`.
 5. `docker compose up -d --build`, проверить `docker compose ps` и логи.
-6. Обновление: `git pull && docker compose up -d --build`.
+6. Обновление: push в `main` — GitHub Actions (CI → Deploy) сам прогонит тесты,
+   соберёт образ и обновит сервер; вручную: `git pull && docker compose up -d --build`.
 7. Бэкап: копия `data/bot.db` (или тома `bot_data`) — в ней и профили, и
    расписание.
 

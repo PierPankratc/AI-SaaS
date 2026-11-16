@@ -165,8 +165,33 @@ docker compose exec bot ls /app/src/db
 docker compose exec bot python -m src.tools.sync_schedule --stats
 ```
 
-Автодеплой: workflow `.github/workflows/deploy.yml` применяется при push в
-`main` (и вручную через «Run workflow»). Он выполняет те же команды на сервере.
+### 5.1 Автодеплой из GitHub Actions (CI → Deploy)
+
+Workflow `.github/workflows/deploy.yml` запускается при push в `main`
+(и вручную: **Actions → CI / Deploy → Run workflow**). Pipeline состоит из двух
+job:
+
+1. **ci** — `ruff check src tests`, `python -m compileall -q src tests`,
+   `pytest -q` и `docker build` (проверка, что образ собирается). Запускается
+   также на каждый pull request.
+2. **deploy** — выполняется только если `ci` прошёл успешно и только для push
+   в `main` (или ручного запуска): по SSH заходит на сервер, делает
+   `git reset --hard origin/main`, пересобирает и перезапускает контейнер и
+   ждёт статус `healthy` (иначе деплой считается проваленным).
+
+Обязательные секреты репозитория (**Settings → Secrets and variables →
+Actions**):
+
+| Секрет | Назначение |
+|---|---|
+| `SERVER_HOST` | IP или домен VPS |
+| `SERVER_USER` | пользователь SSH, у которого лежит `~/app` и есть доступ к `docker` |
+| `SERVER_SSH_KEY` | приватный SSH-ключ (публичный — в `~/.ssh/authorized_keys` этого пользователя) |
+| `SERVER_PORT` | (необязательно) порт SSH, по умолчанию 22 |
+
+Требования к серверу: `~/app` — git-клон репозитория с настроенным deploy key;
+пользователь из `SERVER_USER` состоит в группе `docker`; файл `.env` создан
+заранее — workflow его не перезаписывает.
 
 ## 6. Логирование
 
@@ -345,7 +370,7 @@ docker compose logs -f --tail=100 bot
 
 Автодеплой не срабатывал, пока workflow лежал в `.github/workflow/` (нужна
 папка `.github/workflows/`). Сейчас путь исправлен: проверьте, что на GitHub
-в разделе **Actions → Deploy** появляются запуски при push в `main`.
+в разделе **Actions → CI / Deploy** появляются запуски при push в `main`.
 
 Если профили пользователей остались в старой PostgreSQL, их можно один раз
 перенести в SQLite (см. раздел «Перенос профилей из старой PostgreSQL» в

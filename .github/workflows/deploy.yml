@@ -1,7 +1,9 @@
-name: Deploy
+name: CI / Deploy
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -10,7 +12,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Проверки качества: без их успеха деплой не запускается.
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Compile check
+        run: python -m compileall -q src tests
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+      # Образ собирается здесь же: если Dockerfile сломан, деплой не начнётся.
+      - name: Build Docker image
+        run: docker build -t vk-eios-schedule-bot:ci .
+
+  # Деплой только после успешного CI и только для main (или ручного запуска).
   deploy:
+    needs: ci
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -20,6 +57,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
           script_stop: true
           command_timeout: 15m
           script: |
@@ -32,5 +70,28 @@ jobs:
             # --build обязателен: иначе контейнер продолжит работать
             # со старым образом (например, с кодом времён PostgreSQL).
             docker compose up -d --build --remove-orphans
+
+            # Ждём healthy: контейнер, упавший сразу после старта,
+            # должен валить деплой, а не оставаться незамеченным.
+            attempt=1
+            status=""
+            while [ "$attempt" -le 30 ]; do
+              container="$(docker compose ps -q bot)"
+              if [ -z "$container" ]; then
+                status="missing"
+              else
+                status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+              fi
+              echo "проверка $attempt: $status"
+              [ "$status" = "healthy" ] && break
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            if [ "$status" != "healthy" ]; then
+              echo "ОШИБКА: контейнер bot не стал healthy"
+              docker compose logs --tail=100 bot
+              exit 1
+            fi
+
             docker compose ps
             docker image prune -f
