@@ -91,3 +91,12 @@ def test_levels_courses_menu() -> None:
         Action.NEXT_WEEK,
         Action.CHANGE,
     }
+
+
+def test_main_menu_rows_layout() -> None:
+    menu = main_menu_keyboard()
+    rows = [[_action(button) for button in row] for row in menu.rows]
+
+    assert rows[0] == [Action.TODAY, Action.TOMORROW]
+    assert rows[1] == [Action.WEEK, Action.NEXT_WEEK]
+    assert rows[2] == [Action.CHANGE]

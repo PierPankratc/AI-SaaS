@@ -191,8 +191,8 @@ def main_menu_keyboard() -> KeyboardSpec:
                 ButtonSpec("📅 На сегодня", make_payload(Action.TODAY), "primary"),
                 ButtonSpec("📆 На завтра", make_payload(Action.TOMORROW), "primary"),
             ),
-            (ButtonSpec("🗓 На эту неделю", make_payload(Action.WEEK), "primary"),),
             (
+                ButtonSpec("🗓 На эту неделю", make_payload(Action.WEEK), "primary"),
                 ButtonSpec(
                     "⏭ На следующую неделю",
                     make_payload(Action.NEXT_WEEK),
